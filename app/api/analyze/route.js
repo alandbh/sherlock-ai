@@ -1,5 +1,6 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { GoogleAIFileManager } from "@google/generative-ai/files";
+import { createHash } from "crypto";
 import fs from "fs/promises";
 import os from "os";
 import path from "path";
@@ -24,29 +25,96 @@ async function fetchDriveFile(accessToken, file) {
   return Buffer.from(arrayBuffer);
 }
 
+async function cleanupGhostFiles(fileManager) {
+  try {
+    const listResult = await fileManager.listFiles();
+    if (!listResult.files) return;
+    for (const f of listResult.files) {
+      // Deletar arquivos fantasma (name "undefined") ou com estado FAILED
+      if (
+        f.name === "files/undefined" ||
+        f.displayName === "undefined" ||
+        f.state === "FAILED"
+      ) {
+        await fileManager.deleteFile(f.name).catch(() => { });
+      }
+    }
+  } catch {
+    // ignora erros na limpeza
+  }
+}
+
+async function findExistingFile(fileManager, resourceName) {
+  try {
+    const file = await fileManager.getFile(resourceName);
+    if (file && (file.state === "ACTIVE" || file.state === "PROCESSING")) {
+      return file;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function waitForFileActive(fileManager, fileName, maxWaitMs = 120_000) {
+  const start = Date.now();
+  while (Date.now() - start < maxWaitMs) {
+    const file = await fileManager.getFile(fileName);
+    if (file.state === "ACTIVE") return file;
+    if (file.state === "FAILED") throw new Error(`File processing failed: ${fileName}`);
+    await new Promise((r) => setTimeout(r, 3000));
+  }
+  throw new Error(`Timeout waiting for file ${fileName} to become ACTIVE.`);
+}
+
 async function uploadVideoToGemini(fileManager, file, buffer) {
+  // Nome de recurso único, determinístico e ≤ 40 chars
+  const hash = createHash("sha256").update(file.id).digest("hex").slice(0, 32);
+  const resourceName = `sh-${hash}`;
+
+  // 1. Limpar arquivos fantasma de tentativas anteriores
+  await cleanupGhostFiles(fileManager);
+
+  // 2. Verificar se já existe upload deste arquivo
+  const existing = await findExistingFile(fileManager, `files/${resourceName}`);
+  if (existing) {
+    if (existing.state === "ACTIVE") return existing;
+    return waitForFileActive(fileManager, existing.name);
+  }
+
+  // 3. Upload novo — com name explícito para evitar "files/undefined"
   const extension = file.mimeType.split("/")[1] || "bin";
-  const uniqueName = `sherlock-${file.id}-${Date.now()}`;
-  const tempPath = path.join(
-    os.tmpdir(),
-    `${uniqueName}.${extension}`
-  );
+  const tempPath = path.join(os.tmpdir(), `${resourceName}-${Date.now()}.${extension}`);
 
   await fs.writeFile(tempPath, buffer);
   try {
     const uploadResult = await fileManager.uploadFile(tempPath, {
       mimeType: file.mimeType,
-      displayName: `${file.name}-${Date.now()}`
+      displayName: file.name,
+      name: resourceName
     });
-    return uploadResult.file;
+
+    const uploaded = uploadResult.file;
+    if (uploaded.state === "PROCESSING") {
+      return waitForFileActive(fileManager, uploaded.name);
+    }
+    return uploaded;
   } catch (err) {
-    // Se 409 (arquivo já existe), tenta listar e reusar
     if (err.status === 409) {
-      const listResult = await fileManager.listFiles();
-      const existing = listResult.files?.find(
-        (f) => f.displayName === file.name && f.state === "ACTIVE"
-      );
-      if (existing) return existing;
+      // Arquivo já existe — tentar reusar
+      const fallback = await findExistingFile(fileManager, `files/${resourceName}`);
+      if (fallback) {
+        if (fallback.state === "ACTIVE") return fallback;
+        return waitForFileActive(fileManager, fallback.name);
+      }
+      // Se não encontrou por name, tentar deletar e re-upload
+      await fileManager.deleteFile(`files/${resourceName}`).catch(() => { });
+      const retryResult = await fileManager.uploadFile(tempPath, {
+        mimeType: file.mimeType,
+        displayName: file.name,
+        name: resourceName
+      });
+      return retryResult.file;
     }
     throw err;
   } finally {
@@ -81,7 +149,7 @@ export async function POST(request) {
     const fileManager = new GoogleAIFileManager(process.env.GEMINI_API_KEY);
     const systemPrompt = await loadSystemPrompt();
     const model = genAI.getGenerativeModel({
-      model: "gemini-2.5-flash",
+      model: "gemini-2.5-pro",
       systemInstruction: systemPrompt || ""
     });
 
@@ -119,7 +187,18 @@ export async function POST(request) {
       contents: [{ role: "user", parts }]
     });
 
-    return Response.json({ text: result.response.text() });
+    const usage = result.response.usageMetadata || null;
+
+    return Response.json({
+      text: result.response.text(),
+      usage: usage
+        ? {
+          promptTokenCount: usage.promptTokenCount ?? 0,
+          candidatesTokenCount: usage.candidatesTokenCount ?? 0,
+          totalTokenCount: usage.totalTokenCount ?? 0
+        }
+        : null
+    });
   } catch (error) {
     console.error(error);
     return Response.json({ error: "Erro ao gerar avaliação." }, { status: 500 });

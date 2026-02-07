@@ -193,7 +193,8 @@ export default function HomePage() {
         title: `Avaliação ${new Date().toLocaleTimeString("pt-BR")}`,
         heuristics: heuristicsPayload,
         files: pickedFiles,
-        response: data.text
+        response: data.text,
+        usage: data.usage || null
       };
       const id = await db.evaluations.add(record);
       await loadEvaluations(id);
@@ -373,6 +374,32 @@ export default function HomePage() {
               </p>
             )}
           </div>
+
+          {activeEvaluation?.usage && (
+            <div className="mt-4 flex flex-wrap items-center gap-4 rounded-lg border border-slate-800 bg-slate-950/60 px-4 py-3">
+              <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                Consumo de Tokens
+              </span>
+              <div className="flex items-center gap-1.5 text-xs text-slate-300">
+                <span className="text-slate-500">Prompt:</span>
+                <span className="font-mono font-semibold">
+                  {activeEvaluation.usage.promptTokenCount?.toLocaleString("pt-BR")}
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5 text-xs text-slate-300">
+                <span className="text-slate-500">Resposta:</span>
+                <span className="font-mono font-semibold">
+                  {activeEvaluation.usage.candidatesTokenCount?.toLocaleString("pt-BR")}
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5 text-xs text-slate-300">
+                <span className="text-slate-500">Total:</span>
+                <span className="font-mono font-semibold text-accent">
+                  {activeEvaluation.usage.totalTokenCount?.toLocaleString("pt-BR")}
+                </span>
+              </div>
+            </div>
+          )}
         </section>
       </main>
     </div>
