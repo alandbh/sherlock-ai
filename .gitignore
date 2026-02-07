@@ -1,6 +1,5 @@
 node_modules
 heuristics.json
-system_prompt.txt
 .next
 .cursor
 .env.local
