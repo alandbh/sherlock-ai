@@ -26,6 +26,7 @@ export default function DrivePickerButton({
 
         const picker = new window.google.picker.PickerBuilder()
           .addView(view)
+          .enableFeature(window.google.picker.Feature.MULTISELECT_ENABLED)
           .setOAuthToken(accessToken)
           .setDeveloperKey(developerKey)
           .setAppId(appId)

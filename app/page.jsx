@@ -356,7 +356,13 @@ export default function HomePage() {
                 accessToken={accessToken}
                 developerKey={developerKey}
                 appId={appId}
-                onPicked={setPickedFiles}
+                onPicked={(newFiles) =>
+                  setPickedFiles((prev) => {
+                    const existingIds = new Set(prev.map((f) => f.id));
+                    const unique = newFiles.filter((f) => !existingIds.has(f.id));
+                    return [...prev, ...unique];
+                  })
+                }
               />
 
               {pickedFiles.length > 0 && (
@@ -390,7 +396,7 @@ export default function HomePage() {
                 <Badge variant="outline" className="h-7 w-7 items-center justify-center rounded-full p-0 font-bold">
                   3
                 </Badge>
-                <h2 className="text-base font-semibold">Add a context</h2>
+                <h2 className="text-base font-semibold">Add a context <span className="text-muted-foreground">(optional)</span></h2>
               </div>
               <textarea
                 value={analysisContext}
