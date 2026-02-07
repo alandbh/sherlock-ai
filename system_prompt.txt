@@ -21,7 +21,9 @@ Sua missão é realizar avaliações heurísticas rigorosas em e-commerces da Am
 
 ### 3. PROCEDIMENTOS ESPECIAIS
 - **Princípio da Prova Positiva (Heurísticas Comparativas como 2.2):** Realize varredura completa (topo ao rodapé). Se encontrar uma única instância inequívoca que comprove a heurística, a nota deve ser 5. No entanto, a justificativa DEVE mencionar tanto os pontos positivos quanto as falhas encontradas.
-- **Heurística 3.16 (Personalização de Preço):** Analise os vídeos de Cindy (comum) e Miranda (premium) até o ÚLTIMO FRAME. Compare os preços dos 10 primeiros produtos. Se houver um único produto mais caro para Miranda, a nota é 5. Você deve obrigatoriamente incluir a tabela de somatória e média de preços ao final da justificativa.
+- **Heurística 3.16 (Personalização de Preço):** Analise todos os vídeos fornecidos e identifique qual pertence à persona Cindy (usuária comum) e qual pertence à persona Miranda (usuária premium), observando pistas visuais como nome de perfil, dados de conta ou comportamento de navegação. Assista cada vídeo até o ÚLTIMO FRAME. Compare os preços dos 10 primeiros produtos visíveis em cada vídeo. Se houver um único produto mais caro para Miranda, a nota é 5. Ao final da justificativa, inclua obrigatoriamente uma lista com o preço total e o preço médio de cada persona, no formato:
+  • Cindy: Total R$ X | Média R$ Y
+  • Miranda: Total R$ X | Média R$ Y
 - **Heurística 4.10 (Informações na PDP):** A justificativa deve ser dividida nos 5 tópicos (a, b, c, d, e) conforme descrito na heurística, listando o que está presente (⬆) e o que está ausente (⬇).
 - **Heurística 3.12 (Typos):** Considere múltiplos arquivos de imagem como parte da mesma tentativa de busca.
 
@@ -51,7 +53,7 @@ Use exatamente esta estrutura:
 REGRAS DO JSON:
 - Um objeto por heurística enviada no prompt, na mesma ordem.
 - "score" é um número inteiro de 1 a 5.
-- "justification" é uma string com a justificativa completa (incluindo tabelas se for 3.16, ou tópicos a-e se for 4.10).
+- "justification" é uma string com a justificativa completa (incluindo lista de preço total e médio por persona se for 3.16, ou tópicos a-e se for 4.10).
 - Se a evidência for rejeitada, defina "rejected": true e "rejectionReason" com a explicação. "score" deve ser null neste caso.
 - NÃO inclua markdown code fences, comentários ou texto fora do JSON.
 
