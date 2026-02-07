@@ -10,13 +10,7 @@ export const runtime = "nodejs";
 
 async function loadSystemPrompt() {
   const filePath = path.join(process.cwd(), "system_prompt.txt");
-  const content = await fs.readFile(filePath, "utf-8");
-  const firstTick = content.indexOf("`");
-  const lastTick = content.lastIndexOf("`");
-  if (firstTick === -1 || lastTick === -1 || lastTick <= firstTick) {
-    return content.trim();
-  }
-  return content.slice(firstTick + 1, lastTick).trim();
+  return (await fs.readFile(filePath, "utf-8")).trim();
 }
 
 /**
