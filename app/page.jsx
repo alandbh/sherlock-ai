@@ -10,6 +10,17 @@ import { db } from "@/lib/db";
 const GOOGLE_SCOPE =
   "https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile";
 
+const STORAGE_TOKEN_KEY = "sherlock_access_token";
+const STORAGE_USER_KEY = "sherlock_user";
+
+async function fetchUserInfo(token) {
+  const res = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  if (!res.ok) return null;
+  return res.json();
+}
+
 function buildHeuristicsPayload(groups, selectedIds) {
   const items = [];
   groups.forEach((group) => {
@@ -30,6 +41,7 @@ function buildHeuristicsPayload(groups, selectedIds) {
 
 export default function HomePage() {
   const [accessToken, setAccessToken] = useState("");
+  const [user, setUser] = useState(null);
   const [tokenClient, setTokenClient] = useState(null);
   const [selectedHeuristics, setSelectedHeuristics] = useState([]);
   const [heuristicsGroups, setHeuristicsGroups] = useState([]);
@@ -45,6 +57,38 @@ export default function HomePage() {
   const appId = process.env.NEXT_PUBLIC_GOOGLE_APP_ID;
   const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
 
+  // Persist token + user to sessionStorage
+  const persistSession = useCallback(async (token) => {
+    setAccessToken(token);
+    sessionStorage.setItem(STORAGE_TOKEN_KEY, token);
+    const userInfo = await fetchUserInfo(token);
+    if (userInfo) {
+      setUser(userInfo);
+      sessionStorage.setItem(STORAGE_USER_KEY, JSON.stringify(userInfo));
+    }
+  }, []);
+
+  // Restore session from sessionStorage on mount
+  useEffect(() => {
+    const savedToken = sessionStorage.getItem(STORAGE_TOKEN_KEY);
+    if (!savedToken) return;
+
+    fetchUserInfo(savedToken).then((info) => {
+      if (info) {
+        setAccessToken(savedToken);
+        setUser(info);
+        const savedUser = sessionStorage.getItem(STORAGE_USER_KEY);
+        if (savedUser) {
+          try { setUser(JSON.parse(savedUser)); } catch { /* use fetched */ }
+        }
+      } else {
+        // Token expirado — limpar
+        sessionStorage.removeItem(STORAGE_TOKEN_KEY);
+        sessionStorage.removeItem(STORAGE_USER_KEY);
+      }
+    });
+  }, []);
+
   useEffect(() => {
     const interval = setInterval(() => {
       if (window.google?.accounts?.oauth2 && !tokenClient) {
@@ -53,7 +97,7 @@ export default function HomePage() {
           scope: GOOGLE_SCOPE,
           callback: (tokenResponse) => {
             if (tokenResponse?.access_token) {
-              setAccessToken(tokenResponse.access_token);
+              persistSession(tokenResponse.access_token);
             }
           }
         });
@@ -62,7 +106,7 @@ export default function HomePage() {
       }
     }, 400);
     return () => clearInterval(interval);
-  }, [clientId, tokenClient]);
+  }, [clientId, tokenClient, persistSession]);
 
   useEffect(() => {
     const load = async () => {
@@ -99,6 +143,16 @@ export default function HomePage() {
   const handleLogin = () => {
     if (!tokenClient) return;
     tokenClient.requestAccessToken({ prompt: "" });
+  };
+
+  const handleLogout = () => {
+    setAccessToken("");
+    setUser(null);
+    sessionStorage.removeItem(STORAGE_TOKEN_KEY);
+    sessionStorage.removeItem(STORAGE_USER_KEY);
+    if (window.google?.accounts?.oauth2) {
+      window.google.accounts.oauth2.revoke(accessToken, () => {});
+    }
   };
 
   const handleToggle = (id) => {
@@ -188,13 +242,34 @@ export default function HomePage() {
             </p>
           </div>
           <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={handleLogin}
-              className="rounded-md bg-accent px-4 py-2 text-sm font-semibold"
-            >
-              {accessToken ? "Conectado ao Workspace" : "Login com Google Workspace"}
-            </button>
+            {accessToken && user ? (
+              <div className="flex items-center gap-3">
+                {user.picture && (
+                  <img
+                    src={user.picture}
+                    alt={user.name || "User"}
+                    referrerPolicy="no-referrer"
+                    className="h-8 w-8 rounded-full border border-slate-700"
+                  />
+                )}
+                <span className="text-sm text-slate-200">{user.name || user.email}</span>
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  className="rounded-md border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-slate-500 hover:text-white"
+                >
+                  Sair
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={handleLogin}
+                className="rounded-md bg-accent px-4 py-2 text-sm font-semibold"
+              >
+                Login com Google Workspace
+              </button>
+            )}
             <DrivePickerButton
               accessToken={accessToken}
               developerKey={developerKey}
