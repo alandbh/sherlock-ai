@@ -1,12 +1,19 @@
-/* eslint-disable react/no-unknown-property */
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import DrivePickerButton from "@/components/DrivePickerButton";
 import HeuristicsSelector from "@/components/HeuristicsSelector";
 import HistorySidebar from "@/components/HistorySidebar";
+import AppHeader from "@/components/AppHeader";
+import LoginScreen from "@/components/LoginScreen";
+import ResultCard from "@/components/ResultCard";
 import { db } from "@/lib/db";
 import { prepareFileForGemini } from "@/lib/gemini-upload";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
+import { Loader2, Send, FileVideo, FileImage, X, Plus } from "lucide-react";
 
 const GOOGLE_SCOPE =
   "https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile";
@@ -79,14 +86,15 @@ export default function HomePage() {
     fetchUserInfo(savedToken).then((info) => {
       if (info) {
         setAccessToken(savedToken);
-        setUser(info);
         const savedUser = sessionStorage.getItem(STORAGE_USER_KEY);
         if (savedUser) {
           try {
             setUser(JSON.parse(savedUser));
           } catch {
-            /* use fetched */
+            setUser(info);
           }
+        } else {
+          setUser(info);
         }
       } else {
         sessionStorage.removeItem(STORAGE_TOKEN_KEY);
@@ -167,10 +175,8 @@ export default function HomePage() {
     }
   };
 
-  const handleToggle = (id) => {
-    setSelectedHeuristics((prev) =>
-      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
-    );
+  const removeFile = (fileId) => {
+    setPickedFiles((prev) => prev.filter((f) => f.id !== fileId));
   };
 
   // --------------- Main analysis flow (client-side upload) ---------------
@@ -198,7 +204,7 @@ export default function HomePage() {
         selectedHeuristics
       );
 
-      // 1️⃣ Upload all files to Gemini Files API client-side
+      // 1. Upload all files to Gemini Files API client-side
       const mediaParts = [];
       for (let i = 0; i < pickedFiles.length; i++) {
         const file = pickedFiles[i];
@@ -215,7 +221,7 @@ export default function HomePage() {
         mediaParts.push(part);
       }
 
-      // 2️⃣ Send only fileUri refs + heuristics to server (lightweight call)
+      // 2. Send only fileUri refs + heuristics to server
       setUploadStatus("Gerando avaliação com Gemini…");
 
       const response = await fetch("/api/analyze", {
@@ -233,13 +239,13 @@ export default function HomePage() {
         throw new Error(data?.error || "Falha ao analisar.");
       }
 
-      // 3️⃣ Save to IndexedDB
+      // 3. Save to IndexedDB
       const record = {
         createdAt: new Date().toLocaleString("pt-BR"),
         title: `Avaliação ${new Date().toLocaleTimeString("pt-BR")}`,
         heuristics: heuristicsPayload,
         files: pickedFiles,
-        response: data.text,
+        results: data.results || [],
         usage: data.usage || null
       };
       const id = await db.evaluations.add(record);
@@ -266,6 +272,9 @@ export default function HomePage() {
   const handleNewEvaluation = () => {
     setActiveId(null);
     setActiveEvaluation(null);
+    setSelectedHeuristics([]);
+    setPickedFiles([]);
+    setAnalysisContext("");
   };
 
   // --------------- Derived state ---------------
@@ -281,212 +290,212 @@ export default function HomePage() {
     [heuristicsGroups, selectedHeuristics]
   );
 
-  // --------------- Render ---------------
+  // --------------- Not logged in ---------------
+
+  if (!accessToken) {
+    return <LoginScreen onLogin={handleLogin} />;
+  }
+
+  // --------------- Logged in ---------------
 
   return (
-    <div className="flex min-h-screen">
+    <div className="flex h-screen overflow-hidden">
+      {/* Sidebar */}
       <HistorySidebar
         evaluations={evaluations}
         selectedId={activeId}
         onSelect={handleSelectEvaluation}
         onNew={handleNewEvaluation}
       />
-      <main className="flex-1 px-8 py-6">
-        <header className="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-semibold">
-              Avaliação Heurística UX
-            </h1>
-            <p className="text-sm text-slate-400">
-              Selecione heurísticas, evidências do Drive e gere insights com
-              Gemini.
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
-            {accessToken && user ? (
+
+      {/* Main area */}
+      <div className="flex flex-1 flex-col overflow-hidden">
+        <AppHeader user={user} onLogout={handleLogout} />
+
+        <main className="flex-1 overflow-y-auto">
+          <div className="mx-auto max-w-4xl space-y-8 px-6 py-8">
+
+            {/* ---- Step 1: Heuristics ---- */}
+            <section className="space-y-3">
               <div className="flex items-center gap-3">
-                {user.picture && (
-                  <img
-                    src={user.picture}
-                    alt={user.name || "User"}
-                    referrerPolicy="no-referrer"
-                    className="h-8 w-8 rounded-full border border-slate-700"
-                  />
-                )}
-                <span className="text-sm text-slate-200">
-                  {user.name || user.email}
-                </span>
-                <button
-                  type="button"
-                  onClick={handleLogout}
-                  className="rounded-md border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-slate-500 hover:text-white"
-                >
-                  Sair
-                </button>
+                <Badge variant="outline" className="h-7 w-7 items-center justify-center rounded-full p-0 font-bold">
+                  1
+                </Badge>
+                <h2 className="text-base font-semibold">
+                  Select the heuristics you want to investigate
+                </h2>
               </div>
-            ) : (
-              <button
-                type="button"
-                onClick={handleLogin}
-                className="rounded-md bg-accent px-4 py-2 text-sm font-semibold"
-              >
-                Login com Google Workspace
-              </button>
-            )}
-            <DrivePickerButton
-              accessToken={accessToken}
-              developerKey={developerKey}
-              appId={appId}
-              onPicked={setPickedFiles}
-            />
-          </div>
-        </header>
-
-        <section className="mt-8 grid gap-6 lg:grid-cols-[2fr_1fr]">
-          <div className="space-y-6">
-            <div className="rounded-xl border border-slate-800 bg-panel/50 p-5">
-              <h2 className="text-lg font-semibold">
-                Heurísticas Selecionadas
-              </h2>
-              <p className="text-xs text-slate-400">
-                Selecione uma ou mais heurísticas para orientar a análise.
+              <p className="text-sm text-muted-foreground">
+                You can select one or more heuristics.
               </p>
-              <div className="mt-4">
-                {heuristicsLoading ? (
-                  <p className="text-xs text-slate-400">
-                    Carregando heurísticas...
-                  </p>
-                ) : (
-                  <HeuristicsSelector
-                    groups={heuristicsGroups}
-                    selected={selectedHeuristics}
-                    onToggle={handleToggle}
-                  />
-                )}
+              {heuristicsLoading ? (
+                <p className="text-sm text-muted-foreground">Loading heuristics…</p>
+              ) : (
+                <HeuristicsSelector
+                  groups={heuristicsGroups}
+                  selected={selectedHeuristics}
+                  onValueChange={setSelectedHeuristics}
+                />
+              )}
+            </section>
+
+            <Separator />
+
+            {/* ---- Step 2: Evidences ---- */}
+            <section className="space-y-3">
+              <div className="flex items-center gap-3">
+                <Badge variant="outline" className="h-7 w-7 items-center justify-center rounded-full p-0 font-bold">
+                  2
+                </Badge>
+                <h2 className="text-base font-semibold">
+                  Select the evidences on Google Drive
+                </h2>
               </div>
-            </div>
 
-            <div className="rounded-xl border border-slate-800 bg-panel/50 p-5">
-              <h2 className="text-lg font-semibold">Contexto adicional</h2>
-              <p className="text-xs text-slate-400">
-                Forneça detalhes sobre o fluxo ou objetivo do produto.
-              </p>
+              <DrivePickerButton
+                accessToken={accessToken}
+                developerKey={developerKey}
+                appId={appId}
+                onPicked={setPickedFiles}
+              />
+
+              {pickedFiles.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {pickedFiles.map((file) => (
+                    <Badge key={file.id} variant="secondary" className="gap-1.5 py-1 pl-2 pr-1">
+                      {file.mimeType?.startsWith("video/") ? (
+                        <FileVideo className="h-3.5 w-3.5" />
+                      ) : (
+                        <FileImage className="h-3.5 w-3.5" />
+                      )}
+                      <span className="max-w-[180px] truncate text-xs">{file.name}</span>
+                      <button
+                        type="button"
+                        onClick={() => removeFile(file.id)}
+                        className="ml-0.5 rounded-full p-0.5 hover:bg-muted"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </Badge>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            <Separator />
+
+            {/* ---- Step 3: Context ---- */}
+            <section className="space-y-3">
+              <div className="flex items-center gap-3">
+                <Badge variant="outline" className="h-7 w-7 items-center justify-center rounded-full p-0 font-bold">
+                  3
+                </Badge>
+                <h2 className="text-base font-semibold">Add a context</h2>
+              </div>
               <textarea
                 value={analysisContext}
-                onChange={(event) => setAnalysisContext(event.target.value)}
-                className="mt-3 min-h-[120px] w-full rounded-lg border border-slate-800 bg-slate-950/50 p-3 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-accent"
-                placeholder="Descreva o cenário, público-alvo e objetivos..."
+                onChange={(e) => setAnalysisContext(e.target.value)}
+                className="min-h-[100px] w-full rounded-md border bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                placeholder="Describe the scenario, target audience and goals…"
               />
-            </div>
-          </div>
+            </section>
 
-          <div className="space-y-6">
-            <div className="rounded-xl border border-slate-800 bg-panel/50 p-5">
-              <h2 className="text-lg font-semibold">Evidências do Drive</h2>
-              <p className="text-xs text-slate-400">
-                Selecionados: {pickedFiles.length}
-              </p>
-              <ul className="mt-3 space-y-2 text-xs text-slate-300">
-                {pickedFiles.length === 0 ? (
-                  <li>Nenhum arquivo selecionado.</li>
-                ) : (
-                  pickedFiles.map((file) => (
-                    <li
-                      key={file.id}
-                      className="rounded-md border border-slate-800 p-2"
-                    >
-                      <p className="font-semibold">{file.name}</p>
-                      <p className="text-slate-400">{file.mimeType}</p>
-                    </li>
-                  ))
-                )}
-              </ul>
-            </div>
+            <Separator />
 
-            <div className="rounded-xl border border-slate-800 bg-panel/50 p-5">
-              <h2 className="text-lg font-semibold">Resumo da análise</h2>
-              <div className="mt-3 space-y-2 text-xs text-slate-400">
-                <p>Heurísticas: {activeHeuristics.length}</p>
-                <p>Arquivos: {pickedFiles.length}</p>
-              </div>
-              <button
-                type="button"
-                onClick={handleAnalyze}
-                disabled={!canAnalyze}
-                className="mt-4 w-full rounded-md bg-accent px-4 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {loading ? "Analisando…" : "Gerar Avaliação"}
-              </button>
+            {/* ---- Actions ---- */}
+            <section className="flex items-center gap-4">
+              {loading ? (
+                <Button disabled className="gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Aguarde a análise…
+                </Button>
+              ) : (
+                <Button onClick={handleAnalyze} disabled={!canAnalyze} className="gap-2">
+                  <Send className="h-4 w-4" />
+                  Send
+                </Button>
+              )}
 
-              {/* Upload / processing status */}
               {uploadStatus && (
-                <p className="mt-3 text-xs text-amber-400 animate-pulse">
+                <p className="text-sm text-amber-600 dark:text-amber-400 animate-pulse">
                   {uploadStatus}
                 </p>
               )}
-            </div>
-          </div>
-        </section>
+            </section>
 
-        <section className="mt-8 rounded-xl border border-slate-800 bg-panel/40 p-6">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold">Resposta Gemini</h2>
-            {activeEvaluation?.response && (
-              <button
-                type="button"
-                onClick={() =>
-                  navigator.clipboard.writeText(activeEvaluation.response)
-                }
-                className="rounded-md border border-slate-700 px-3 py-1 text-xs text-slate-200 hover:border-slate-500"
-              >
-                Copiar Resposta
-              </button>
+            {/* ---- Results ---- */}
+            {activeEvaluation?.results && activeEvaluation.results.length > 0 && (
+              <>
+                <Separator />
+                <section className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-xl font-bold">Results</h2>
+                    <Button variant="outline" size="sm" onClick={handleNewEvaluation} className="gap-1.5">
+                      <Plus className="h-3.5 w-3.5" />
+                      Nova avaliação
+                    </Button>
+                  </div>
+
+                  <div className="space-y-4">
+                    {activeEvaluation.results.map((result, index) => (
+                      <ResultCard
+                        key={result.heuristicNumber || index}
+                        result={result}
+                      />
+                    ))}
+                  </div>
+
+                  {/* Token usage */}
+                  {activeEvaluation.usage && (
+                    <Card className="bg-muted/30">
+                      <CardContent className="flex flex-wrap items-center gap-6 py-4">
+                        <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                          Token Usage
+                        </span>
+                        <div className="flex items-center gap-1.5 text-sm">
+                          <span className="text-muted-foreground">Prompt:</span>
+                          <span className="font-mono font-semibold">
+                            {activeEvaluation.usage.promptTokenCount?.toLocaleString("pt-BR")}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 text-sm">
+                          <span className="text-muted-foreground">Response:</span>
+                          <span className="font-mono font-semibold">
+                            {activeEvaluation.usage.candidatesTokenCount?.toLocaleString("pt-BR")}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 text-sm">
+                          <span className="text-muted-foreground">Total:</span>
+                          <span className="font-mono font-bold text-primary">
+                            {activeEvaluation.usage.totalTokenCount?.toLocaleString("pt-BR")}
+                          </span>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+                </section>
+              </>
+            )}
+
+            {/* Legacy support: old evaluations with response text instead of results */}
+            {activeEvaluation?.response && !activeEvaluation?.results && (
+              <>
+                <Separator />
+                <section className="space-y-4">
+                  <h2 className="text-xl font-bold">Results</h2>
+                  <Card>
+                    <CardContent className="pt-6">
+                      <div className="whitespace-pre-wrap text-sm">
+                        {activeEvaluation.response}
+                      </div>
+                    </CardContent>
+                  </Card>
+                </section>
+              </>
             )}
           </div>
-          <div className="mt-4 whitespace-pre-wrap text-sm text-slate-200">
-            {activeEvaluation?.response ? (
-              activeEvaluation.response
-            ) : (
-              <p className="text-slate-400">
-                Nenhuma avaliação selecionada. Gere uma nova para ver a
-                resposta.
-              </p>
-            )}
-          </div>
-
-          {activeEvaluation?.usage && (
-            <div className="mt-4 flex flex-wrap items-center gap-4 rounded-lg border border-slate-800 bg-slate-950/60 px-4 py-3">
-              <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-                Consumo de Tokens
-              </span>
-              <div className="flex items-center gap-1.5 text-xs text-slate-300">
-                <span className="text-slate-500">Prompt:</span>
-                <span className="font-mono font-semibold">
-                  {activeEvaluation.usage.promptTokenCount?.toLocaleString(
-                    "pt-BR"
-                  )}
-                </span>
-              </div>
-              <div className="flex items-center gap-1.5 text-xs text-slate-300">
-                <span className="text-slate-500">Resposta:</span>
-                <span className="font-mono font-semibold">
-                  {activeEvaluation.usage.candidatesTokenCount?.toLocaleString(
-                    "pt-BR"
-                  )}
-                </span>
-              </div>
-              <div className="flex items-center gap-1.5 text-xs text-slate-300">
-                <span className="text-slate-500">Total:</span>
-                <span className="font-mono font-semibold text-accent">
-                  {activeEvaluation.usage.totalTokenCount?.toLocaleString(
-                    "pt-BR"
-                  )}
-                </span>
-              </div>
-            </div>
-          )}
-        </section>
-      </main>
+        </main>
+      </div>
     </div>
   );
 }

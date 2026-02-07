@@ -1,4 +1,8 @@
+"use client";
+
 import { useCallback } from "react";
+import { Button } from "@/components/ui/button";
+import { FolderOpen } from "lucide-react";
 
 const VIEW_ID = "DOCS";
 
@@ -44,13 +48,14 @@ export default function DrivePickerButton({
   }, [accessToken, appId, developerKey, onPicked]);
 
   return (
-    <button
-      type="button"
+    <Button
+      variant="outline"
       onClick={openPicker}
       disabled={!accessToken}
-      className="rounded-md border border-slate-700 bg-slate-900/50 px-4 py-2 text-sm font-semibold text-slate-100 hover:border-slate-500 disabled:cursor-not-allowed disabled:opacity-50"
+      className="gap-2"
     >
-      Selecionar Evidências do Drive
-    </button>
+      <FolderOpen className="h-4 w-4" />
+      Select from Google Drive
+    </Button>
   );
 }

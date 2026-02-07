@@ -19,12 +19,47 @@ async function loadSystemPrompt() {
   return content.slice(firstTick + 1, lastTick).trim();
 }
 
+/**
+ * Extract JSON from the Gemini response text.
+ * Handles cases where the model wraps JSON in markdown code fences.
+ */
+function extractJson(text) {
+  // Try direct parse first
+  try {
+    return JSON.parse(text);
+  } catch {
+    // noop
+  }
+
+  // Try extracting from markdown code fences
+  const fenceMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+  if (fenceMatch) {
+    try {
+      return JSON.parse(fenceMatch[1]);
+    } catch {
+      // noop
+    }
+  }
+
+  // Try finding a JSON object in the text
+  const jsonMatch = text.match(/\{[\s\S]*"results"[\s\S]*\}/);
+  if (jsonMatch) {
+    try {
+      return JSON.parse(jsonMatch[0]);
+    } catch {
+      // noop
+    }
+  }
+
+  return null;
+}
+
 /* ------------------------------------------------------------------ */
 /*  POST /api/analyze                                                  */
 /*                                                                     */
 /*  Body:                                                              */
 /*    heuristics  – array of selected heuristic objects                */
-/*    mediaParts  – array of { fileUri, mimeType } (uploaded by client)*/
+/*    mediaParts  – array of { fileUri, mimeType }                     */
 /*    context     – optional extra context string                      */
 /* ------------------------------------------------------------------ */
 
@@ -79,9 +114,27 @@ export async function POST(request) {
     });
 
     const usage = result.response.usageMetadata || null;
+    const responseText = result.response.text();
 
+    // Try to parse structured JSON from the response
+    const parsed = extractJson(responseText);
+
+    if (parsed && Array.isArray(parsed.results)) {
+      return Response.json({
+        results: parsed.results,
+        usage: usage
+          ? {
+              promptTokenCount: usage.promptTokenCount ?? 0,
+              candidatesTokenCount: usage.candidatesTokenCount ?? 0,
+              totalTokenCount: usage.totalTokenCount ?? 0
+            }
+          : null
+      });
+    }
+
+    // Fallback: return raw text as a single result
     return Response.json({
-      text: result.response.text(),
+      results: [{ raw: responseText }],
       usage: usage
         ? {
             promptTokenCount: usage.promptTokenCount ?? 0,
