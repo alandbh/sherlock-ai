@@ -10,7 +10,7 @@ export default function AppHeader({ user, onLogout }) {
     <header className="flex items-center justify-between border-b px-6 py-3">
       {/* Left: Logo + title */}
       <div className="flex items-center gap-3">
-        <Image src="/logo-sherlock.svg" alt="Sherlock" width={32} height={37} />
+        <Image className="dark:invert" src="/logo-sherlock.svg" alt="Sherlock" width={32} height={37} />
         <span className="text-lg font-bold tracking-tight">Sherlock</span>
       </div>
 

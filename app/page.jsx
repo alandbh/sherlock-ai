@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { Loader2, Send, FileVideo, FileImage, X, Plus } from "lucide-react";
+import { Loader2, Send, FileVideo, FileImage, X, Plus, MicroscopeIcon } from "lucide-react";
 
 const GOOGLE_SCOPE =
   "https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile";
@@ -171,7 +171,7 @@ export default function HomePage() {
     sessionStorage.removeItem(STORAGE_TOKEN_KEY);
     sessionStorage.removeItem(STORAGE_USER_KEY);
     if (window.google?.accounts?.oauth2) {
-      window.google.accounts.oauth2.revoke(accessToken, () => {});
+      window.google.accounts.oauth2.revoke(accessToken, () => { });
     }
   };
 
@@ -317,110 +317,127 @@ export default function HomePage() {
 
             {/* ---- Step 1: Heuristics ---- */}
             <section className="space-y-3">
-              <div className="flex items-center gap-3">
-                <Badge variant="outline" className="h-7 w-7 items-center justify-center rounded-full p-0 font-bold">
+              <div className="flex items-start gap-3">
+                <Badge className="h-8 w-8 text-lg items-center justify-center rounded-full p-0 font-bold">
                   1
                 </Badge>
-                <h2 className="text-base font-semibold">
-                  Select the heuristics you want to investigate
-                </h2>
+                <div className="flex flex-col gap-2 flex-1">
+                  <h2 className="text-base font-semibold">
+                    Select the heuristics you want to investigate
+                  </h2>
+                  <p className="text-sm text-muted-foreground">
+                    You can select one or more heuristics.
+                  </p>
+                  {heuristicsLoading ? (
+                    <p className="text-sm text-muted-foreground">Loading heuristics…</p>
+                  ) : (
+                    <HeuristicsSelector
+                      groups={heuristicsGroups}
+                      selected={selectedHeuristics}
+                      onValueChange={setSelectedHeuristics}
+                    />
+                  )}
+
+                </div>
               </div>
-              <p className="text-sm text-muted-foreground">
-                You can select one or more heuristics.
-              </p>
-              {heuristicsLoading ? (
-                <p className="text-sm text-muted-foreground">Loading heuristics…</p>
-              ) : (
-                <HeuristicsSelector
-                  groups={heuristicsGroups}
-                  selected={selectedHeuristics}
-                  onValueChange={setSelectedHeuristics}
-                />
-              )}
             </section>
 
             <Separator />
 
             {/* ---- Step 2: Evidences ---- */}
             <section className="space-y-3">
-              <div className="flex items-center gap-3">
-                <Badge variant="outline" className="h-7 w-7 items-center justify-center rounded-full p-0 font-bold">
+              <div className="flex items-start gap-3">
+                <Badge className="h-8 w-8 text-lg items-center justify-center rounded-full p-0 font-bold">
                   2
                 </Badge>
-                <h2 className="text-base font-semibold">
-                  Select the evidences on Google Drive
-                </h2>
+                <div className="flex flex-col gap-2 flex-1">
+                  <h2 className="text-base font-semibold">
+                    Select the evidences
+                  </h2>
+                  <p className="text-sm text-muted-foreground">
+                    You can select one or more files by holding Ctrl / Cmd key.
+                  </p>
+                  <DrivePickerButton
+                    accessToken={accessToken}
+                    developerKey={developerKey}
+                    appId={appId}
+                    onPicked={(newFiles) =>
+                      setPickedFiles((prev) => {
+                        const existingIds = new Set(prev.map((f) => f.id));
+                        const unique = newFiles.filter((f) => !existingIds.has(f.id));
+                        return [...prev, ...unique];
+                      })
+                    }
+                  />
+
+
+                  {pickedFiles.length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {pickedFiles.map((file) => (
+                        <Badge key={file.id} variant="secondary" className="gap-1.5 py-1 pl-2 pr-1">
+                          {file.mimeType?.startsWith("video/") ? (
+                            <FileVideo className="h-3.5 w-3.5" />
+                          ) : (
+                            <FileImage className="h-3.5 w-3.5" />
+                          )}
+                          <span className="max-w-[180px] truncate text-xs">{file.name}</span>
+                          <button
+                            type="button"
+                            onClick={() => removeFile(file.id)}
+                            className="ml-0.5 rounded-full p-0.5 hover:bg-muted"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
 
-              <DrivePickerButton
-                accessToken={accessToken}
-                developerKey={developerKey}
-                appId={appId}
-                onPicked={(newFiles) =>
-                  setPickedFiles((prev) => {
-                    const existingIds = new Set(prev.map((f) => f.id));
-                    const unique = newFiles.filter((f) => !existingIds.has(f.id));
-                    return [...prev, ...unique];
-                  })
-                }
-              />
 
-              {pickedFiles.length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                  {pickedFiles.map((file) => (
-                    <Badge key={file.id} variant="secondary" className="gap-1.5 py-1 pl-2 pr-1">
-                      {file.mimeType?.startsWith("video/") ? (
-                        <FileVideo className="h-3.5 w-3.5" />
-                      ) : (
-                        <FileImage className="h-3.5 w-3.5" />
-                      )}
-                      <span className="max-w-[180px] truncate text-xs">{file.name}</span>
-                      <button
-                        type="button"
-                        onClick={() => removeFile(file.id)}
-                        className="ml-0.5 rounded-full p-0.5 hover:bg-muted"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </Badge>
-                  ))}
-                </div>
-              )}
             </section>
 
             <Separator />
 
             {/* ---- Step 3: Context ---- */}
             <section className="space-y-3">
-              <div className="flex items-center gap-3">
-                <Badge variant="outline" className="h-7 w-7 items-center justify-center rounded-full p-0 font-bold">
+              <div className="flex items-start gap-3">
+                <Badge className="h-8 w-8 text-lg items-center justify-center rounded-full p-0 font-bold">
                   3
                 </Badge>
-                <h2 className="text-base font-semibold">Add a context <span className="text-muted-foreground">(optional)</span></h2>
+                <div className="flex flex-col gap-2 flex-1">
+                  <h2 className="text-base font-semibold">Add a context <span className="text-muted-foreground">(optional)</span></h2>
+                  <textarea
+                    value={analysisContext}
+                    onChange={(e) => setAnalysisContext(e.target.value)}
+                    className="min-h-[100px] w-full rounded-md border bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    placeholder="Describe the scenario, target audience and goals…"
+                  />
+
+                </div>
               </div>
-              <textarea
-                value={analysisContext}
-                onChange={(e) => setAnalysisContext(e.target.value)}
-                className="min-h-[100px] w-full rounded-md border bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                placeholder="Describe the scenario, target audience and goals…"
-              />
             </section>
 
             <Separator />
 
             {/* ---- Actions ---- */}
-            <section className="flex items-center gap-4">
-              {loading ? (
-                <Button disabled className="gap-2">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Aguarde a análise…
-                </Button>
-              ) : (
-                <Button onClick={handleAnalyze} disabled={!canAnalyze} className="gap-2">
-                  <Send className="h-4 w-4" />
-                  Send
-                </Button>
-              )}
+            <section className="flex items-center gap-4 justify-center">
+              <div className="flex flex-col gap-2 w-full max-w-[600px] items-center">
+                {loading ? (
+                  <Button disabled className="gap-2 w-full max-w-[400px] text-lg py-6">
+                    <Loader2 className="h-6 w-6 animate-spin" />
+                    Waiting for analysis…
+                  </Button>
+                ) : (
+                  <Button onClick={handleAnalyze} disabled={!canAnalyze} className="gap-2 w-full max-w-[300px] text-lg py-6">
+
+                    <MicroscopeIcon className="h-6 w-6" />
+                    Let`s take a look!
+                  </Button>
+                )}
+
+              </div>
 
               {uploadStatus && (
                 <p className="text-sm text-amber-600 dark:text-amber-400 animate-pulse">

@@ -17,12 +17,12 @@ export default function HistorySidebar({
       {/* Sidebar header */}
       <div className="flex items-center justify-between border-b px-4 py-3">
         <div className="flex items-center gap-2">
-          <Image src="/logo-sherlock.svg" alt="Sherlock" width={22} height={26} />
-          <span className="text-sm font-semibold">Last analysis</span>
+          {/* <Image src="/logo-sherlock.svg" alt="Sherlock" width={22} height={26} /> */}
+          <span className="text-sm font-semibold">Previous analyses</span>
         </div>
         <Button variant="ghost" size="icon" onClick={onNew} className="h-8 w-8">
           <Plus className="h-4 w-4" />
-          <span className="sr-only">Nova análise</span>
+          <span className="sr-only">New analysis</span>
         </Button>
       </div>
 
@@ -31,7 +31,7 @@ export default function HistorySidebar({
         <div className="space-y-1 p-2">
           {evaluations.length === 0 ? (
             <p className="px-2 py-4 text-center text-xs text-muted-foreground">
-              Nenhuma avaliação ainda.
+              No previous analyses yet.
             </p>
           ) : (
             evaluations.map((item) => (
