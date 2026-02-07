@@ -6,6 +6,7 @@ import DrivePickerButton from "@/components/DrivePickerButton";
 import HeuristicsSelector from "@/components/HeuristicsSelector";
 import HistorySidebar from "@/components/HistorySidebar";
 import { db } from "@/lib/db";
+import { prepareFileForGemini } from "@/lib/gemini-upload";
 
 const GOOGLE_SCOPE =
   "https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile";
@@ -49,6 +50,7 @@ export default function HomePage() {
   const [pickedFiles, setPickedFiles] = useState([]);
   const [analysisContext, setAnalysisContext] = useState("");
   const [loading, setLoading] = useState(false);
+  const [uploadStatus, setUploadStatus] = useState("");
   const [evaluations, setEvaluations] = useState([]);
   const [activeId, setActiveId] = useState(null);
   const [activeEvaluation, setActiveEvaluation] = useState(null);
@@ -56,8 +58,10 @@ export default function HomePage() {
   const developerKey = process.env.NEXT_PUBLIC_GOOGLE_API_KEY;
   const appId = process.env.NEXT_PUBLIC_GOOGLE_APP_ID;
   const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
+  const geminiApiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
 
-  // Persist token + user to sessionStorage
+  // --------------- Session persistence ---------------
+
   const persistSession = useCallback(async (token) => {
     setAccessToken(token);
     sessionStorage.setItem(STORAGE_TOKEN_KEY, token);
@@ -68,7 +72,6 @@ export default function HomePage() {
     }
   }, []);
 
-  // Restore session from sessionStorage on mount
   useEffect(() => {
     const savedToken = sessionStorage.getItem(STORAGE_TOKEN_KEY);
     if (!savedToken) return;
@@ -79,15 +82,20 @@ export default function HomePage() {
         setUser(info);
         const savedUser = sessionStorage.getItem(STORAGE_USER_KEY);
         if (savedUser) {
-          try { setUser(JSON.parse(savedUser)); } catch { /* use fetched */ }
+          try {
+            setUser(JSON.parse(savedUser));
+          } catch {
+            /* use fetched */
+          }
         }
       } else {
-        // Token expirado — limpar
         sessionStorage.removeItem(STORAGE_TOKEN_KEY);
         sessionStorage.removeItem(STORAGE_USER_KEY);
       }
     });
   }, []);
+
+  // --------------- Google Identity Services ---------------
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -107,6 +115,8 @@ export default function HomePage() {
     }, 400);
     return () => clearInterval(interval);
   }, [clientId, tokenClient, persistSession]);
+
+  // --------------- Load heuristics & evaluations ---------------
 
   useEffect(() => {
     const load = async () => {
@@ -140,6 +150,8 @@ export default function HomePage() {
     loadEvaluations();
   }, [loadEvaluations]);
 
+  // --------------- Handlers ---------------
+
   const handleLogin = () => {
     if (!tokenClient) return;
     tokenClient.requestAccessToken({ prompt: "" });
@@ -161,24 +173,57 @@ export default function HomePage() {
     );
   };
 
+  // --------------- Main analysis flow (client-side upload) ---------------
+
   const handleAnalyze = async () => {
-    if (!accessToken || selectedHeuristics.length === 0 || pickedFiles.length === 0) {
+    if (
+      !accessToken ||
+      selectedHeuristics.length === 0 ||
+      pickedFiles.length === 0
+    ) {
+      return;
+    }
+
+    if (!geminiApiKey) {
+      setUploadStatus("Erro: NEXT_PUBLIC_GEMINI_API_KEY não configurada.");
       return;
     }
 
     setLoading(true);
+    setUploadStatus("");
+
     try {
       const heuristicsPayload = buildHeuristicsPayload(
         heuristicsGroups,
         selectedHeuristics
       );
+
+      // 1️⃣ Upload all files to Gemini Files API client-side
+      const mediaParts = [];
+      for (let i = 0; i < pickedFiles.length; i++) {
+        const file = pickedFiles[i];
+        setUploadStatus(
+          `[${i + 1}/${pickedFiles.length}] Preparando "${file.name}"…`
+        );
+        const part = await prepareFileForGemini(
+          accessToken,
+          geminiApiKey,
+          file,
+          (status) =>
+            setUploadStatus(`[${i + 1}/${pickedFiles.length}] ${status}`)
+        );
+        mediaParts.push(part);
+      }
+
+      // 2️⃣ Send only fileUri refs + heuristics to server (lightweight call)
+      setUploadStatus("Gerando avaliação com Gemini…");
+
       const response = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          accessToken,
           heuristics: heuristicsPayload,
-          files: pickedFiles,
+          mediaParts,
           context: analysisContext
         })
       });
@@ -188,6 +233,7 @@ export default function HomePage() {
         throw new Error(data?.error || "Falha ao analisar.");
       }
 
+      // 3️⃣ Save to IndexedDB
       const record = {
         createdAt: new Date().toLocaleString("pt-BR"),
         title: `Avaliação ${new Date().toLocaleTimeString("pt-BR")}`,
@@ -200,12 +246,16 @@ export default function HomePage() {
       await loadEvaluations(id);
       setActiveEvaluation({ ...record, id });
       setActiveId(id);
+      setUploadStatus("");
     } catch (error) {
       console.error(error);
+      setUploadStatus(`Erro: ${error.message}`);
     } finally {
       setLoading(false);
     }
   };
+
+  // --------------- Evaluation navigation ---------------
 
   const handleSelectEvaluation = async (id) => {
     const item = await db.evaluations.get(id);
@@ -218,13 +268,20 @@ export default function HomePage() {
     setActiveEvaluation(null);
   };
 
+  // --------------- Derived state ---------------
+
   const canAnalyze =
-    accessToken && selectedHeuristics.length > 0 && pickedFiles.length > 0 && !loading;
+    accessToken &&
+    selectedHeuristics.length > 0 &&
+    pickedFiles.length > 0 &&
+    !loading;
 
   const activeHeuristics = useMemo(
     () => buildHeuristicsPayload(heuristicsGroups, selectedHeuristics),
     [heuristicsGroups, selectedHeuristics]
   );
+
+  // --------------- Render ---------------
 
   return (
     <div className="flex min-h-screen">
@@ -237,9 +294,12 @@ export default function HomePage() {
       <main className="flex-1 px-8 py-6">
         <header className="flex flex-wrap items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-semibold">Avaliação Heurística UX</h1>
+            <h1 className="text-2xl font-semibold">
+              Avaliação Heurística UX
+            </h1>
             <p className="text-sm text-slate-400">
-              Selecione heurísticas, evidências do Drive e gere insights com Gemini.
+              Selecione heurísticas, evidências do Drive e gere insights com
+              Gemini.
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -253,7 +313,9 @@ export default function HomePage() {
                     className="h-8 w-8 rounded-full border border-slate-700"
                   />
                 )}
-                <span className="text-sm text-slate-200">{user.name || user.email}</span>
+                <span className="text-sm text-slate-200">
+                  {user.name || user.email}
+                </span>
                 <button
                   type="button"
                   onClick={handleLogout}
@@ -283,13 +345,17 @@ export default function HomePage() {
         <section className="mt-8 grid gap-6 lg:grid-cols-[2fr_1fr]">
           <div className="space-y-6">
             <div className="rounded-xl border border-slate-800 bg-panel/50 p-5">
-              <h2 className="text-lg font-semibold">Heurísticas Selecionadas</h2>
+              <h2 className="text-lg font-semibold">
+                Heurísticas Selecionadas
+              </h2>
               <p className="text-xs text-slate-400">
                 Selecione uma ou mais heurísticas para orientar a análise.
               </p>
               <div className="mt-4">
                 {heuristicsLoading ? (
-                  <p className="text-xs text-slate-400">Carregando heurísticas...</p>
+                  <p className="text-xs text-slate-400">
+                    Carregando heurísticas...
+                  </p>
                 ) : (
                   <HeuristicsSelector
                     groups={heuristicsGroups}
@@ -325,7 +391,10 @@ export default function HomePage() {
                   <li>Nenhum arquivo selecionado.</li>
                 ) : (
                   pickedFiles.map((file) => (
-                    <li key={file.id} className="rounded-md border border-slate-800 p-2">
+                    <li
+                      key={file.id}
+                      className="rounded-md border border-slate-800 p-2"
+                    >
                       <p className="font-semibold">{file.name}</p>
                       <p className="text-slate-400">{file.mimeType}</p>
                     </li>
@@ -346,8 +415,15 @@ export default function HomePage() {
                 disabled={!canAnalyze}
                 className="mt-4 w-full rounded-md bg-accent px-4 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {loading ? "Analisando..." : "Gerar Avaliação"}
+                {loading ? "Analisando…" : "Gerar Avaliação"}
               </button>
+
+              {/* Upload / processing status */}
+              {uploadStatus && (
+                <p className="mt-3 text-xs text-amber-400 animate-pulse">
+                  {uploadStatus}
+                </p>
+              )}
             </div>
           </div>
         </section>
@@ -358,7 +434,9 @@ export default function HomePage() {
             {activeEvaluation?.response && (
               <button
                 type="button"
-                onClick={() => navigator.clipboard.writeText(activeEvaluation.response)}
+                onClick={() =>
+                  navigator.clipboard.writeText(activeEvaluation.response)
+                }
                 className="rounded-md border border-slate-700 px-3 py-1 text-xs text-slate-200 hover:border-slate-500"
               >
                 Copiar Resposta
@@ -370,7 +448,8 @@ export default function HomePage() {
               activeEvaluation.response
             ) : (
               <p className="text-slate-400">
-                Nenhuma avaliação selecionada. Gere uma nova para ver a resposta.
+                Nenhuma avaliação selecionada. Gere uma nova para ver a
+                resposta.
               </p>
             )}
           </div>
@@ -383,19 +462,25 @@ export default function HomePage() {
               <div className="flex items-center gap-1.5 text-xs text-slate-300">
                 <span className="text-slate-500">Prompt:</span>
                 <span className="font-mono font-semibold">
-                  {activeEvaluation.usage.promptTokenCount?.toLocaleString("pt-BR")}
+                  {activeEvaluation.usage.promptTokenCount?.toLocaleString(
+                    "pt-BR"
+                  )}
                 </span>
               </div>
               <div className="flex items-center gap-1.5 text-xs text-slate-300">
                 <span className="text-slate-500">Resposta:</span>
                 <span className="font-mono font-semibold">
-                  {activeEvaluation.usage.candidatesTokenCount?.toLocaleString("pt-BR")}
+                  {activeEvaluation.usage.candidatesTokenCount?.toLocaleString(
+                    "pt-BR"
+                  )}
                 </span>
               </div>
               <div className="flex items-center gap-1.5 text-xs text-slate-300">
                 <span className="text-slate-500">Total:</span>
                 <span className="font-mono font-semibold text-accent">
-                  {activeEvaluation.usage.totalTokenCount?.toLocaleString("pt-BR")}
+                  {activeEvaluation.usage.totalTokenCount?.toLocaleString(
+                    "pt-BR"
+                  )}
                 </span>
               </div>
             </div>
