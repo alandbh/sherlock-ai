@@ -427,7 +427,7 @@ export default function HomePage() {
             <Separator />
 
             {/* ---- Actions ---- */}
-            <section className="flex items-center gap-4 justify-center">
+            <section className="flex items-center gap-4 justify-center flex-col">
               <div className="flex flex-col gap-2 w-full max-w-[600px] items-center">
                 {loading ? (
                   <Button disabled className="gap-2 w-full max-w-[400px] text-lg py-6">
