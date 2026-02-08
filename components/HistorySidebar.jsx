@@ -13,12 +13,12 @@ export default function HistorySidebar({
   onNew
 }) {
   return (
-    <aside className="flex w-64 flex-col border-r bg-muted/30">
+    <aside className="flex w-64 flex-col border-r bg-muted/30 px-2">
       {/* Sidebar header */}
       <div className="flex items-center justify-between border-b px-4 py-3">
-        <div className="flex items-center gap-2">
-          {/* <Image src="/logo-sherlock.svg" alt="Sherlock" width={22} height={26} /> */}
-          <span className="text-sm font-semibold">Previous analyses</span>
+        <div className="flex items-center gap-3">
+          <Image className="dark:invert" src="/logo-sherlock.svg" alt="Sherlock" width={32} height={37} />
+          <span className="text-lg font-bold tracking-tight">Sherlock</span>
         </div>
         <Button variant="ghost" size="icon" onClick={onNew} className="h-8 w-8">
           <Plus className="h-4 w-4" />
@@ -28,7 +28,8 @@ export default function HistorySidebar({
 
       {/* Evaluation list */}
       <ScrollArea className="flex-1">
-        <div className="space-y-1 p-2">
+        <div className="space-y-1 p-2  w-64">
+          <h2 className="text-sm font-semibold mt-6 mb-4">Previous analyses</h2>
           {evaluations.length === 0 ? (
             <p className="px-2 py-4 text-center text-xs text-muted-foreground">
               No previous analyses yet.

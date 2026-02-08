@@ -240,9 +240,14 @@ export default function HomePage() {
       }
 
       // 3. Save to IndexedDB
+      const evalTitle =
+        heuristicsPayload.length === 1
+          ? `${heuristicsPayload[0].heuristicNumber} ${heuristicsPayload[0].name}`
+          : `✱ Multiple: ${heuristicsPayload.map((h) => h.heuristicNumber).join(", ")}`;
+
       const record = {
         createdAt: new Date().toLocaleString("pt-BR"),
-        title: `Avaliação ${new Date().toLocaleTimeString("pt-BR")}`,
+        title: evalTitle,
         heuristics: heuristicsPayload,
         files: pickedFiles,
         results: data.results || [],
