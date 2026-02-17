@@ -22,7 +22,7 @@ export default function DrivePickerButton({
         const view = new window.google.picker.View(
           window.google.picker.ViewId[VIEW_ID]
         );
-        view.setMimeTypes("video/mp4,image/*");
+        view.setMimeTypes("video/mp4,video/quicktime,video/x-matroska,video/webm,video/x-msvideo,image/*");
 
         const picker = new window.google.picker.PickerBuilder()
           .addView(view)
