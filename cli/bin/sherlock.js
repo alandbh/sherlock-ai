@@ -199,13 +199,233 @@ program
     }
   });
 
+program
+  .command("batch <arquivo>")
+  .description("Analisar múltiplas heurísticas a partir de um arquivo (TXT ou JSON)")
+  .option("-p, --project <nome>", "Nome do projeto")
+  .option("-c, --context <texto>", "Contexto global (aplicado a todas as análises)")
+  .option("-o, --output <arquivo>", "Salvar todos os resultados em JSON")
+  .option("--continue-on-error", "Continuar mesmo se uma análise falhar")
+  .action(async (arquivo, options) => {
+    const spinner = ora();
+
+    try {
+      // 1. Resolver projeto
+      const project = await resolveProject(options.project);
+      console.log(chalk.dim(`\nUsando projeto: ${chalk.cyan(project.name)}\n`));
+
+      // 2. Carregar heurísticas do projeto
+      const allHeuristics = await project.loadHeuristics();
+      const systemPrompt = await project.loadSystemPrompt();
+
+      // 3. Parsear arquivo batch
+      const batchItems = await parseBatchFile(arquivo);
+      if (!batchItems || batchItems.length === 0) {
+        console.error(chalk.red("Nenhum item válido encontrado no arquivo batch."));
+        process.exit(1);
+      }
+
+      console.log(chalk.bold(`📦 Análise em lote: ${path.basename(arquivo)} (${batchItems.length} itens)\n`));
+
+      // 4. Validar heurísticas e resolver arquivos
+      const validatedItems = [];
+      for (const item of batchItems) {
+        const heuristic = allHeuristics.find((h) => h.heuristicNumber === item.heuristic);
+        if (!heuristic) {
+          console.error(chalk.red(`Heurística não encontrada: ${item.heuristic}`));
+          if (!options.continueOnError) process.exit(1);
+          continue;
+        }
+
+        const filePath = await resolveFile(item.evidence, true);
+        if (!filePath) {
+          console.error(chalk.red(`Arquivo não encontrado: ${item.evidence}`));
+          if (!options.continueOnError) process.exit(1);
+          continue;
+        }
+
+        validatedItems.push({
+          heuristic,
+          heuristicNumber: item.heuristic,
+          filePath,
+          fileName: path.basename(filePath),
+          mimeType: getMimeType(filePath),
+          context: item.context || options.context || ""
+        });
+      }
+
+      if (validatedItems.length === 0) {
+        console.error(chalk.red("Nenhum item válido para processar."));
+        process.exit(1);
+      }
+
+      // 5. Processar cada item
+      const allResults = [];
+      let totalTokens = 0;
+      let passCount = 0;
+      let failCount = 0;
+      let rejectCount = 0;
+
+      for (let i = 0; i < validatedItems.length; i++) {
+        const item = validatedItems[i];
+        const progress = `[${i + 1}/${validatedItems.length}]`;
+
+        console.log(chalk.bold(`${progress} ${item.heuristicNumber} → ${item.fileName}`));
+
+        try {
+          // Upload
+          spinner.start("  Enviando para o Gemini...");
+          const { fileUri } = await uploadLocalFile(item.filePath, item.mimeType);
+          spinner.succeed("  Upload concluído");
+
+          // Análise
+          spinner.start("  Analisando...");
+          const result = await analyzeWithGemini({
+            heuristics: [item.heuristic],
+            mediaParts: [{ fileUri, mimeType: item.mimeType }],
+            context: item.context,
+            systemPrompt
+          });
+          spinner.succeed("  Análise concluída");
+
+          // Processar resultado
+          const r = result.results[0];
+          allResults.push({
+            heuristicNumber: item.heuristicNumber,
+            fileName: item.fileName,
+            ...r
+          });
+
+          if (r.rejected) {
+            rejectCount++;
+            console.log(chalk.red(`  ✗ REJEITADA: ${r.rejectionReason}`));
+          } else if (r.score >= 4) {
+            passCount++;
+            console.log(chalk.green(`  ✓ Score: ${r.score}/5`));
+          } else {
+            failCount++;
+            console.log(chalk.yellow(`  ● Score: ${r.score}/5`));
+          }
+
+          if (result.usage) {
+            totalTokens += result.usage.totalTokenCount || 0;
+          }
+
+          console.log();
+
+        } catch (err) {
+          spinner.fail(chalk.red(`  Erro: ${err.message}`));
+          allResults.push({
+            heuristicNumber: item.heuristicNumber,
+            fileName: item.fileName,
+            error: err.message
+          });
+
+          if (!options.continueOnError) {
+            process.exit(1);
+          }
+          console.log();
+        }
+      }
+
+      // 6. Resumo final
+      console.log(chalk.dim("─────────────────────────────────────────────────"));
+      console.log(chalk.bold(`📊 Resumo: ${validatedItems.length} análises | `) +
+        chalk.green(`${passCount} pass`) + " | " +
+        chalk.yellow(`${failCount} fail`) +
+        (rejectCount > 0 ? " | " + chalk.red(`${rejectCount} rejected`) : ""));
+      console.log(chalk.dim(`   Tokens totais: ${totalTokens.toLocaleString()}`));
+
+      // 7. Salvar se solicitado
+      if (options.output) {
+        const outputData = {
+          batchFile: arquivo,
+          project: project.name,
+          timestamp: new Date().toISOString(),
+          summary: { total: validatedItems.length, pass: passCount, fail: failCount, rejected: rejectCount, totalTokens },
+          results: allResults
+        };
+        await fs.writeFile(options.output, JSON.stringify(outputData, null, 2));
+        console.log(chalk.green(`\n✓ Resultados salvos em ${options.output}`));
+      }
+
+    } catch (err) {
+      spinner.fail(chalk.red(err.message));
+      if (process.env.DEBUG) {
+        console.error(err);
+      }
+      process.exit(1);
+    }
+  });
+
 program.parse();
+
+/**
+ * Parseia arquivo batch (TXT ou JSON)
+ * TXT: linhas no formato "heuristica arquivo" (ignora linhas vazias e comentários #)
+ * JSON: array de { heuristic, evidence, context? }
+ */
+async function parseBatchFile(filePath) {
+  const resolvedPath = path.resolve(filePath);
+  
+  try {
+    await fs.access(resolvedPath);
+  } catch {
+    throw new Error(`Arquivo batch não encontrado: ${filePath}`);
+  }
+
+  const content = await fs.readFile(resolvedPath, "utf-8");
+  const ext = path.extname(filePath).toLowerCase();
+
+  if (ext === ".json") {
+    try {
+      const items = JSON.parse(content);
+      if (!Array.isArray(items)) {
+        throw new Error("Arquivo JSON deve conter um array de itens.");
+      }
+      return items.map((item) => ({
+        heuristic: String(item.heuristic || item.heuristicNumber),
+        evidence: item.evidence || item.file || item.video,
+        context: item.context || ""
+      })).filter((item) => item.heuristic && item.evidence);
+    } catch (err) {
+      throw new Error(`Erro ao parsear JSON: ${err.message}`);
+    }
+  }
+
+  // Formato TXT (default)
+  const lines = content.split("\n");
+  const items = [];
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    
+    // Ignorar linhas vazias e comentários
+    if (!trimmed || trimmed.startsWith("#")) {
+      continue;
+    }
+
+    // Formato: "heuristica arquivo" ou "heuristica    arquivo" (múltiplos espaços/tabs)
+    const parts = trimmed.split(/\s+/);
+    if (parts.length >= 2) {
+      items.push({
+        heuristic: parts[0],
+        evidence: parts.slice(1).join(" "), // Permite nomes com espaço
+        context: ""
+      });
+    }
+  }
+
+  return items;
+}
 
 /**
  * Resolve arquivo por nome exato ou parcial
  * Suporta: "video.mp4" ou "vid" (encontra arquivos que começam com "vid")
+ * @param {string} input - Nome ou caminho do arquivo
+ * @param {boolean} silent - Se true, não exibe mensagens (usado no batch)
  */
-async function resolveFile(input) {
+async function resolveFile(input, silent = false) {
   const inputPath = path.resolve(input);
 
   // 1. Tentar caminho exato
@@ -224,7 +444,7 @@ async function resolveFile(input) {
   try {
     files = await fs.readdir(dir);
   } catch {
-    console.error(chalk.red(`Erro: Diretório não encontrado: ${dir}`));
+    if (!silent) console.error(chalk.red(`Erro: Diretório não encontrado: ${dir}`));
     return null;
   }
 
@@ -239,23 +459,27 @@ async function resolveFile(input) {
   });
 
   if (matches.length === 0) {
-    console.error(chalk.red(`Erro: Nenhum arquivo encontrado com "${input}"`));
-    console.log(chalk.dim("Dica: verifique o nome do arquivo ou use tab para autocompletar"));
+    if (!silent) {
+      console.error(chalk.red(`Erro: Nenhum arquivo encontrado com "${input}"`));
+      console.log(chalk.dim("Dica: verifique o nome do arquivo ou use tab para autocompletar"));
+    }
     return null;
   }
 
   if (matches.length === 1) {
     const resolved = path.join(dir, matches[0]);
-    console.log(chalk.dim(`Arquivo encontrado: ${matches[0]}`));
+    if (!silent) console.log(chalk.dim(`Arquivo encontrado: ${matches[0]}`));
     return resolved;
   }
 
   // Múltiplos matches - mostrar opções
-  console.error(chalk.yellow(`Múltiplos arquivos encontrados com "${input}":\n`));
-  matches.forEach((m, i) => {
-    console.log(chalk.dim(`  ${i + 1}. ${m}`));
-  });
-  console.log(chalk.yellow("\nSeja mais específico no nome do arquivo."));
+  if (!silent) {
+    console.error(chalk.yellow(`Múltiplos arquivos encontrados com "${input}":\n`));
+    matches.forEach((m, i) => {
+      console.log(chalk.dim(`  ${i + 1}. ${m}`));
+    });
+    console.log(chalk.yellow("\nSeja mais específico no nome do arquivo."));
+  }
   return null;
 }
 

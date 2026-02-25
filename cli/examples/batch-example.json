@@ -1,0 +1,15 @@
+[
+  {
+    "heuristic": "3.10",
+    "evidence": "v3-mercadolivre.mp4"
+  },
+  {
+    "heuristic": "3.16",
+    "evidence": "v4-mercadolivre.mp4",
+    "context": "Comparação entre Cindy e Miranda"
+  },
+  {
+    "heuristic": "4.10",
+    "evidence": "v5-mercadolivre.mp4"
+  }
+]
