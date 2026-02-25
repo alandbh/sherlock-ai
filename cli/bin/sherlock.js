@@ -28,8 +28,7 @@ program
   .argument("<heuristicas>", "Números das heurísticas (ex: 3.16 ou 3.16,3.17)")
   .option("-p, --project <nome>", "Nome do projeto (retail6, finance, etc)")
   .option("-c, --context <texto>", "Contexto adicional")
-  .option("-o, --output <arquivo>", "Salvar resultado em arquivo JSON")
-  .option("--json", "Exibir resultado em formato JSON")
+  .option("-o, --output <arquivo>", "Salvar resultado (txt, json, ou nome.ext)")
   .action(async (video, heuristicasArg, options) => {
     const spinner = ora();
 
@@ -79,25 +78,28 @@ program
       });
       spinner.succeed("Análise concluída!");
 
-      // 6. Exibir resultado
-      if (options.json) {
-        console.log(JSON.stringify(result, null, 2));
-      } else {
-        console.log("\n" + chalk.bold("📊 Resultados:\n"));
-        for (const r of result.results) {
-          printResult(r);
-        }
+      // 6. Exibir resultado no terminal
+      console.log("\n" + chalk.bold("📊 Resultados:\n"));
+      for (const r of result.results) {
+        printResult(r);
+      }
 
-        if (result.usage) {
-          console.log(chalk.dim("\n─────────────────────────────────────"));
-          console.log(chalk.dim(`Tokens: ${result.usage.totalTokenCount} (prompt: ${result.usage.promptTokenCount}, resposta: ${result.usage.candidatesTokenCount})`));
-        }
+      if (result.usage) {
+        console.log(chalk.dim("\n─────────────────────────────────────"));
+        console.log(chalk.dim(`Tokens: ${result.usage.totalTokenCount} (prompt: ${result.usage.promptTokenCount}, resposta: ${result.usage.candidatesTokenCount})`));
       }
 
       // 7. Salvar se solicitado
       if (options.output) {
-        await fs.writeFile(options.output, JSON.stringify(result, null, 2));
-        console.log(chalk.green(`\n✓ Resultado salvo em ${options.output}`));
+        const { outputPath, format } = resolveOutputPath(options.output, "results");
+        
+        if (format === "json") {
+          await fs.writeFile(outputPath, JSON.stringify(result, null, 2));
+        } else {
+          const txtContent = formatResultsAsTxt(result.results, project.name, result.usage);
+          await fs.writeFile(outputPath, txtContent);
+        }
+        console.log(chalk.green(`\n✓ Resultado salvo em ${outputPath}`));
       }
 
     } catch (err) {
@@ -204,7 +206,7 @@ program
   .description("Analisar múltiplas heurísticas a partir de um arquivo (TXT ou JSON)")
   .option("-p, --project <nome>", "Nome do projeto")
   .option("-c, --context <texto>", "Contexto global (aplicado a todas as análises)")
-  .option("-o, --output <arquivo>", "Salvar todos os resultados em JSON")
+  .option("-o, --output <arquivo>", "Formato de saída (txt, json, ou nome.ext). Default: txt")
   .option("--continue-on-error", "Continuar mesmo se uma análise falhar")
   .action(async (arquivo, options) => {
     const spinner = ora();
@@ -292,6 +294,7 @@ program
           const r = result.results[0];
           allResults.push({
             heuristicNumber: item.heuristicNumber,
+            name: item.heuristic.name,
             fileName: item.fileName,
             ...r
           });
@@ -317,6 +320,7 @@ program
           spinner.fail(chalk.red(`  Erro: ${err.message}`));
           allResults.push({
             heuristicNumber: item.heuristicNumber,
+            name: item.heuristic.name,
             fileName: item.fileName,
             error: err.message
           });
@@ -336,18 +340,28 @@ program
         (rejectCount > 0 ? " | " + chalk.red(`${rejectCount} rejected`) : ""));
       console.log(chalk.dim(`   Tokens totais: ${totalTokens.toLocaleString()}`));
 
-      // 7. Salvar se solicitado
-      if (options.output) {
+      // 7. Salvar resultados (TXT por default)
+      const batchBaseName = path.basename(arquivo, path.extname(arquivo));
+      const defaultOutputName = `results_${batchBaseName}`;
+      const { outputPath, format } = resolveOutputPath(options.output || "txt", defaultOutputName);
+
+      const summary = { total: validatedItems.length, pass: passCount, fail: failCount, rejected: rejectCount, totalTokens };
+
+      if (format === "json") {
         const outputData = {
           batchFile: arquivo,
           project: project.name,
           timestamp: new Date().toISOString(),
-          summary: { total: validatedItems.length, pass: passCount, fail: failCount, rejected: rejectCount, totalTokens },
+          summary,
           results: allResults
         };
-        await fs.writeFile(options.output, JSON.stringify(outputData, null, 2));
-        console.log(chalk.green(`\n✓ Resultados salvos em ${options.output}`));
+        await fs.writeFile(outputPath, JSON.stringify(outputData, null, 2));
+      } else {
+        const txtContent = formatBatchResultsAsTxt(allResults, project.name, summary, arquivo);
+        await fs.writeFile(outputPath, txtContent);
       }
+
+      console.log(chalk.green(`\n✓ Resultados salvos em ${outputPath}`));
 
     } catch (err) {
       spinner.fail(chalk.red(err.message));
@@ -523,4 +537,97 @@ function printResult(r) {
   console.log(chalk.cyan(`${r.heuristicNumber}: ${r.name}`));
   console.log(`  ${icon} Score: ${scoreColor(r.score + "/5")}`);
   console.log(chalk.dim(`  ${r.justification}\n`));
+}
+
+/**
+ * Resolve o caminho e formato do arquivo de saída
+ * Aceita: "txt", "json", "nome.txt", "nome.json", "nome" (assume txt)
+ */
+function resolveOutputPath(output, defaultName) {
+  // Se for apenas "txt" ou "json", usa nome default
+  if (output === "txt") {
+    return { outputPath: `${defaultName}.txt`, format: "txt" };
+  }
+  if (output === "json") {
+    return { outputPath: `${defaultName}.json`, format: "json" };
+  }
+
+  // Se tiver extensão, usa ela
+  const ext = path.extname(output).toLowerCase();
+  if (ext === ".json") {
+    return { outputPath: output, format: "json" };
+  }
+  if (ext === ".txt") {
+    return { outputPath: output, format: "txt" };
+  }
+
+  // Sem extensão, assume txt
+  return { outputPath: `${output}.txt`, format: "txt" };
+}
+
+/**
+ * Formata resultados de análise simples como TXT
+ */
+function formatResultsAsTxt(results, projectName, usage) {
+  const timestamp = new Date().toLocaleString("pt-BR");
+  let txt = `# Análise Sherlock - ${timestamp}\n`;
+  txt += `# Projeto: ${projectName}\n\n`;
+
+  for (const r of results) {
+    txt += `## ${r.heuristicNumber} - ${r.name}\n`;
+    
+    if (r.rejected) {
+      txt += `Status: REJEITADA\n`;
+      txt += `Motivo: ${r.rejectionReason}\n`;
+    } else if (r.error) {
+      txt += `Status: ERRO\n`;
+      txt += `Motivo: ${r.error}\n`;
+    } else {
+      txt += `Score: ${r.score}/5\n`;
+      txt += `\n${r.justification}\n`;
+    }
+    
+    txt += `\n---\n\n`;
+  }
+
+  if (usage) {
+    txt += `Tokens: ${usage.totalTokenCount?.toLocaleString() || 0}\n`;
+  }
+
+  return txt;
+}
+
+/**
+ * Formata resultados de análise batch como TXT
+ */
+function formatBatchResultsAsTxt(results, projectName, summary, batchFile) {
+  const timestamp = new Date().toLocaleString("pt-BR");
+  let txt = `# Análise Sherlock (Batch) - ${timestamp}\n`;
+  txt += `# Projeto: ${projectName}\n`;
+  txt += `# Arquivo: ${batchFile}\n`;
+  txt += `# Resumo: ${summary.total} análises | ${summary.pass} pass | ${summary.fail} fail`;
+  if (summary.rejected > 0) txt += ` | ${summary.rejected} rejected`;
+  txt += `\n\n`;
+
+  for (const r of results) {
+    txt += `## ${r.heuristicNumber} - ${r.name || "N/A"}\n`;
+    txt += `Arquivo: ${r.fileName}\n`;
+    
+    if (r.rejected) {
+      txt += `Status: REJEITADA\n`;
+      txt += `Motivo: ${r.rejectionReason}\n`;
+    } else if (r.error) {
+      txt += `Status: ERRO\n`;
+      txt += `Motivo: ${r.error}\n`;
+    } else {
+      txt += `Score: ${r.score}/5\n`;
+      txt += `\n${r.justification}\n`;
+    }
+    
+    txt += `\n---\n\n`;
+  }
+
+  txt += `Tokens totais: ${summary.totalTokens?.toLocaleString() || 0}\n`;
+
+  return txt;
 }
