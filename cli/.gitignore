@@ -1,0 +1,11 @@
+# Dependências
+node_modules/
+
+# Variáveis de ambiente (contém chaves secretas)
+.env
+
+# Arquivos de configuração local
+.sherlock.json
+
+# Resultados de análise
+*.output.json
