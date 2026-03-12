@@ -1,0 +1,25 @@
+{
+  "projects": [
+    {
+      "name": "Finfacts Brasil 2026",
+      "edition": "5",
+      "year": "2026",
+      "slug": "finance5",
+      "heuristics": "/heuristics?project=finance5"
+    },
+    {
+      "name": "Flashblack 2026",
+      "edition": "6",
+      "year": "2025",
+      "slug": "retail6",
+      "heuristics": "/heuristics?project=retail6"
+    },
+    {
+      "name": "Retail Garage SPLA",
+      "edition": "2",
+      "year": "2025",
+      "slug": "rspla2",
+      "heuristics": "/heuristics?project=rspla2"
+    }
+  ]
+}

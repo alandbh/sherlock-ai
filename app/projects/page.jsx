@@ -2,10 +2,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import ProjectsScreen from "@/components/ProjectsScreen";
 import LoginScreen from "@/components/LoginScreen";
-
-const GOOGLE_SCOPE =
-  "https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile";
+import { Loader2 } from "lucide-react";
 
 const STORAGE_TOKEN_KEY = "sherlock_access_token";
 const STORAGE_USER_KEY = "sherlock_user";
@@ -18,9 +17,10 @@ async function fetchUserInfo(token) {
   return res.json();
 }
 
-export default function HomePage() {
+export default function ProjectsPage() {
   const router = useRouter();
   const [accessToken, setAccessToken] = useState("");
+  const [user, setUser] = useState(null);
   const [tokenClient, setTokenClient] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
 
@@ -31,6 +31,7 @@ export default function HomePage() {
     sessionStorage.setItem(STORAGE_TOKEN_KEY, token);
     const userInfo = await fetchUserInfo(token);
     if (userInfo) {
+      setUser(userInfo);
       sessionStorage.setItem(STORAGE_USER_KEY, JSON.stringify(userInfo));
     }
     router.push("/projects");
@@ -40,6 +41,7 @@ export default function HomePage() {
     const savedToken = sessionStorage.getItem(STORAGE_TOKEN_KEY);
     if (!savedToken) {
       setAuthChecked(true);
+      router.replace("/");
       return;
     }
 
@@ -47,10 +49,20 @@ export default function HomePage() {
       setAuthChecked(true);
       if (info) {
         setAccessToken(savedToken);
-        router.push("/projects");
+        const savedUser = sessionStorage.getItem(STORAGE_USER_KEY);
+        if (savedUser) {
+          try {
+            setUser(JSON.parse(savedUser));
+          } catch {
+            setUser(info);
+          }
+        } else {
+          setUser(info);
+        }
       } else {
         sessionStorage.removeItem(STORAGE_TOKEN_KEY);
         sessionStorage.removeItem(STORAGE_USER_KEY);
+        router.replace("/");
       }
     });
   }, [router]);
@@ -60,7 +72,7 @@ export default function HomePage() {
       if (window.google?.accounts?.oauth2 && !tokenClient) {
         const client = window.google.accounts.oauth2.initTokenClient({
           client_id: clientId,
-          scope: GOOGLE_SCOPE,
+          scope: "https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile",
           callback: (tokenResponse) => {
             if (tokenResponse?.access_token) {
               persistSession(tokenResponse.access_token);
@@ -79,13 +91,28 @@ export default function HomePage() {
     tokenClient.requestAccessToken({ prompt: "" });
   };
 
-  if (!authChecked || accessToken) {
+  const handleLogout = () => {
+    setAccessToken("");
+    setUser(null);
+    sessionStorage.removeItem(STORAGE_TOKEN_KEY);
+    sessionStorage.removeItem(STORAGE_USER_KEY);
+    if (window.google?.accounts?.oauth2) {
+      window.google.accounts.oauth2.revoke(accessToken, () => {});
+    }
+    router.replace("/");
+  };
+
+  if (!authChecked) {
     return (
       <div className="flex min-h-screen items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
       </div>
     );
   }
 
-  return <LoginScreen onLogin={handleLogin} />;
+  if (!accessToken) {
+    return <LoginScreen onLogin={handleLogin} />;
+  }
+
+  return <ProjectsScreen user={user} onLogout={handleLogout} />;
 }

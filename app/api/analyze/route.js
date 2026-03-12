@@ -8,7 +8,15 @@ export const runtime = "nodejs";
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
 
-async function loadSystemPrompt() {
+async function loadSystemPrompt(projectSlug) {
+  if (projectSlug) {
+    const filePath = path.join(process.cwd(), "system_prompts", `${projectSlug}.txt`);
+    try {
+      return (await fs.readFile(filePath, "utf-8")).trim();
+    } catch {
+      return null;
+    }
+  }
   const filePath = path.join(process.cwd(), "system_prompt.txt");
   return (await fs.readFile(filePath, "utf-8")).trim();
 }
@@ -52,14 +60,15 @@ function extractJson(text) {
 /*  POST /api/analyze                                                  */
 /*                                                                     */
 /*  Body:                                                              */
-/*    heuristics  – array of selected heuristic objects                */
-/*    mediaParts  – array of { fileUri, mimeType }                     */
-/*    context     – optional extra context string                      */
+/*    heuristics   – array of selected heuristic objects               */
+/*    mediaParts   – array of { fileUri, mimeType }                    */
+/*    context      – optional extra context string                     */
+/*    projectSlug  – slug do projeto (para system_prompt)              */
 /* ------------------------------------------------------------------ */
 
 export async function POST(request) {
   try {
-    const { heuristics, mediaParts, context } = await request.json();
+    const { heuristics, mediaParts, context, projectSlug } = await request.json();
 
     if (!mediaParts?.length) {
       return Response.json(
@@ -76,7 +85,13 @@ export async function POST(request) {
     }
 
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const systemPrompt = await loadSystemPrompt();
+    const systemPrompt = await loadSystemPrompt(projectSlug);
+    if (!systemPrompt) {
+      return Response.json(
+        { error: `System prompt não encontrado para o projeto "${projectSlug || "default"}".` },
+        { status: 404 }
+      );
+    }
 
     const model = genAI.getGenerativeModel({
       model: "gemini-2.5-pro",
