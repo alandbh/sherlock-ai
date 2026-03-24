@@ -21,50 +21,69 @@ import { resolveProject, listProjects } from "../lib/project.js";
 program
   .name("sherlock")
   .description("Análise heurística de UX com IA")
-  .version("1.0.0", "-v, --version");
+  .version("1.0.0", "-v, --version")
+  .option("-p, --project <nome>", "Nome do projeto (retail6, finance5, etc)")
+  .option("-o, --output <arquivo>", "Salvar resultado (txt, json, ou nome.ext)")
+  .option("-c, --context <texto>", "Contexto adicional");
 
 program
-  .argument("<video>", "Caminho do vídeo ou imagem")
+  .argument("<video>", "Caminho do vídeo ou imagem (vários: v1.mp4,v2.mp4)")
   .argument("<heuristicas>", "Números das heurísticas (ex: 3.16 ou 3.16,3.17)")
-  .option("-p, --project <nome>", "Nome do projeto (retail6, finance, etc)")
-  .option("-c, --context <texto>", "Contexto adicional")
-  .option("-o, --output <arquivo>", "Salvar resultado (txt, json, ou nome.ext)")
+  .option("-j, --journey <slug>", "Jornada da heurística (obrigatório em projetos Finance; ex: abertura, app)")
   .action(async (video, heuristicasArg, options) => {
     const spinner = ora();
+    const opts = { ...program.opts(), ...options };
 
     try {
       // 1. Resolver projeto
-      const project = await resolveProject(options.project);
+      const project = await resolveProject(opts.project);
       console.log(chalk.dim(`\nUsando projeto: ${chalk.cyan(project.name)}\n`));
 
-      // 2. Resolver arquivo (suporta nome parcial)
-      const videoPath = await resolveFile(video);
-      if (!videoPath) {
+      // 2. Resolver arquivo(s) (suporta nome parcial e múltiplos: v1,v2)
+      const videoPaths = await resolveFiles(video);
+      if (!videoPaths || videoPaths.length === 0) {
         process.exit(1);
       }
 
-      const mimeType = getMimeType(videoPath);
-      const fileName = path.basename(videoPath);
+      const mediaParts = [];
+      for (const p of videoPaths) {
+        mediaParts.push({ path: p, mimeType: getMimeType(p) });
+      }
+      const fileNames = videoPaths.map((p) => path.basename(p));
 
       // 3. Carregar heurísticas do projeto
       spinner.start("Carregando heurísticas...");
       const allHeuristics = await project.loadHeuristics();
       const numeros = heuristicasArg.split(",").map((n) => n.trim());
-      const selected = filterByNumber(allHeuristics, numeros);
+      let selected;
+      try {
+        selected = filterByNumberAndJourney(allHeuristics, numeros, opts.journey, project.meta);
+      } catch (err) {
+        spinner.fail(chalk.red(err.message));
+        process.exit(1);
+      }
 
       if (selected.length === 0) {
         spinner.fail(chalk.red(`Nenhuma heurística encontrada: ${heuristicasArg}`));
         console.log(chalk.dim("\nHeurísticas disponíveis:"));
         const available = allHeuristics.map((h) => h.heuristicNumber).sort();
         console.log(chalk.dim(available.join(", ")));
+        if (project.meta?.requiresJourney) {
+          const journeys = getUniqueJourneySlugs(allHeuristics);
+          console.log(chalk.dim(`Jornadas: ${journeys.join(", ")}`));
+        }
         process.exit(1);
       }
       spinner.succeed(`${selected.length} heurística(s) selecionada(s): ${numeros.join(", ")}`);
 
       // 4. Upload para Gemini
-      spinner.start(`Enviando ${chalk.cyan(fileName)} para o Gemini...`);
-      const { fileUri } = await uploadLocalFile(videoPath, mimeType);
-      spinner.succeed(`Upload concluído: ${fileName}`);
+      spinner.start(`Enviando ${chalk.cyan(fileNames.join(", "))} para o Gemini...`);
+      const uploadedMedia = [];
+      for (const mp of mediaParts) {
+        const { fileUri } = await uploadLocalFile(mp.path, mp.mimeType);
+        uploadedMedia.push({ fileUri, mimeType: mp.mimeType });
+      }
+      spinner.succeed(`Upload concluído: ${fileNames.join(", ")}`);
 
       // 5. Carregar system prompt e analisar
       spinner.start("Analisando com Gemini 2.5 Pro...");
@@ -72,8 +91,8 @@ program
       
       const result = await analyzeWithGemini({
         heuristics: selected,
-        mediaParts: [{ fileUri, mimeType }],
-        context: options.context || "",
+        mediaParts: uploadedMedia,
+        context: opts.context || "",
         systemPrompt
       });
       spinner.succeed("Análise concluída!");
@@ -90,8 +109,8 @@ program
       }
 
       // 7. Salvar se solicitado
-      if (options.output) {
-        const { outputPath, format } = resolveOutputPath(options.output, "results");
+      if (opts.output) {
+        const { outputPath, format } = resolveOutputPath(opts.output, "results");
         
         if (format === "json") {
           await fs.writeFile(outputPath, JSON.stringify(result, null, 2));
@@ -132,20 +151,24 @@ program
 program
   .command("heuristics")
   .description("Listar heurísticas de um projeto")
-  .option("-p, --project <nome>", "Nome do projeto")
   .option("-g, --group <numero>", "Filtrar por grupo")
-  .action(async (options) => {
+  .option("-j, --journey <slug>", "Filtrar por jornada (projetos Finance)")
+  .action(async (options, command) => {
+    const opts = { ...program.opts(), ...(command?.opts?.() || {}), ...options };
     try {
-      const project = await resolveProject(options.project);
+      const project = await resolveProject(opts.project);
       const heuristics = await project.loadHeuristics();
 
       console.log(chalk.bold(`\n📋 Heurísticas do projeto ${chalk.cyan(project.name)}:\n`));
 
       let filtered = heuristics;
-      if (options.group) {
-        filtered = heuristics.filter(
-          (h) => h.group.groupNumber === parseInt(options.group)
+      if (opts.group) {
+        filtered = filtered.filter(
+          (h) => h.group?.groupNumber === parseInt(opts.group)
         );
+      }
+      if (opts.journey) {
+        filtered = filtered.filter((h) => matchesJourney(h, opts.journey));
       }
 
       const grouped = {};
@@ -204,16 +227,16 @@ program
 program
   .command("batch <arquivo>")
   .description("Analisar múltiplas heurísticas a partir de um arquivo (TXT ou JSON)")
-  .option("-p, --project <nome>", "Nome do projeto")
   .option("-c, --context <texto>", "Contexto global (aplicado a todas as análises)")
   .option("-o, --output <arquivo>", "Formato de saída (txt, json, ou nome.ext). Default: txt")
   .option("--continue-on-error", "Continuar mesmo se uma análise falhar")
-  .action(async (arquivo, options) => {
+  .action(async (arquivo, options, command) => {
     const spinner = ora();
+    const opts = { ...program.opts(), ...(command?.opts?.() || {}), ...options };
 
     try {
       // 1. Resolver projeto
-      const project = await resolveProject(options.project);
+      const project = await resolveProject(opts.project);
       console.log(chalk.dim(`\nUsando projeto: ${chalk.cyan(project.name)}\n`));
 
       // 2. Carregar heurísticas do projeto
@@ -230,29 +253,54 @@ program
       console.log(chalk.bold(`📦 Análise em lote: ${path.basename(arquivo)} (${batchItems.length} itens)\n`));
 
       // 4. Validar heurísticas e resolver arquivos
+      const requiresJourney = project.meta?.requiresJourney === true;
       const validatedItems = [];
+
       for (const item of batchItems) {
-        const heuristic = allHeuristics.find((h) => h.heuristicNumber === item.heuristic);
-        if (!heuristic) {
-          console.error(chalk.red(`Heurística não encontrada: ${item.heuristic}`));
-          if (!options.continueOnError) process.exit(1);
+        if (requiresJourney && !item.journey) {
+          const journeys = getUniqueJourneySlugs(allHeuristics);
+          console.error(chalk.red(`Projeto Finance exige jornada. Use formato 3.16:abertura ou "journey" no JSON.`));
+          console.error(chalk.dim(`Jornadas disponíveis: ${journeys.join(", ")}`));
+          if (!opts.continueOnError) process.exit(1);
           continue;
         }
 
-        const filePath = await resolveFile(item.evidence, true);
-        if (!filePath) {
-          console.error(chalk.red(`Arquivo não encontrado: ${item.evidence}`));
-          if (!options.continueOnError) process.exit(1);
+        let heuristic;
+        try {
+          heuristic = findHeuristicByNumberAndJourney(allHeuristics, item.heuristic, item.journey, project.meta);
+        } catch (err) {
+          console.error(chalk.red(err.message));
+          if (!opts.continueOnError) process.exit(1);
           continue;
         }
+
+        if (!heuristic) {
+          const journeyPart = item.journey ? `:${item.journey}` : "";
+          console.error(chalk.red(`Heurística não encontrada: ${item.heuristic}${journeyPart}`));
+          if (!opts.continueOnError) process.exit(1);
+          continue;
+        }
+
+        const filePaths = [];
+        for (const ev of item.evidence) {
+          const fp = await resolveFile(ev, true);
+          if (!fp) {
+            console.error(chalk.red(`Arquivo não encontrado: ${ev}`));
+            if (!opts.continueOnError) process.exit(1);
+            break;
+          }
+          filePaths.push(fp);
+        }
+        if (filePaths.length !== item.evidence.length) continue;
 
         validatedItems.push({
           heuristic,
           heuristicNumber: item.heuristic,
-          filePath,
-          fileName: path.basename(filePath),
-          mimeType: getMimeType(filePath),
-          context: item.context || options.context || ""
+          journeySlug: item.journey,
+          filePaths,
+          fileNames: filePaths.map((p) => path.basename(p)),
+          mediaParts: filePaths.map((p) => ({ path: p, mimeType: getMimeType(p) })),
+          context: item.context || opts.context || ""
         });
       }
 
@@ -272,19 +320,24 @@ program
         const item = validatedItems[i];
         const progress = `[${i + 1}/${validatedItems.length}]`;
 
-        console.log(chalk.bold(`${progress} ${item.heuristicNumber} → ${item.fileName}`));
+        const journeyPart = item.journeySlug ? ` [${item.journeySlug}]` : "";
+        console.log(chalk.bold(`${progress} ${item.heuristicNumber}${journeyPart} → ${item.fileNames.join(", ")}`));
 
         try {
           // Upload
           spinner.start("  Enviando para o Gemini...");
-          const { fileUri } = await uploadLocalFile(item.filePath, item.mimeType);
+          const uploadedMedia = [];
+          for (const mp of item.mediaParts) {
+            const { fileUri } = await uploadLocalFile(mp.path, mp.mimeType);
+            uploadedMedia.push({ fileUri, mimeType: mp.mimeType });
+          }
           spinner.succeed("  Upload concluído");
 
           // Análise
           spinner.start("  Analisando...");
           const result = await analyzeWithGemini({
             heuristics: [item.heuristic],
-            mediaParts: [{ fileUri, mimeType: item.mimeType }],
+            mediaParts: uploadedMedia,
             context: item.context,
             systemPrompt
           });
@@ -295,7 +348,7 @@ program
           allResults.push({
             heuristicNumber: item.heuristicNumber,
             name: item.heuristic.name,
-            fileName: item.fileName,
+            fileName: item.fileNames.join(", "),
             ...r
           });
 
@@ -321,11 +374,11 @@ program
           allResults.push({
             heuristicNumber: item.heuristicNumber,
             name: item.heuristic.name,
-            fileName: item.fileName,
+            fileName: item.fileNames.join(", "),
             error: err.message
           });
 
-          if (!options.continueOnError) {
+          if (!opts.continueOnError) {
             process.exit(1);
           }
           console.log();
@@ -343,7 +396,7 @@ program
       // 7. Salvar resultados (TXT por default)
       const batchBaseName = path.basename(arquivo, path.extname(arquivo));
       const defaultOutputName = `results_${batchBaseName}`;
-      const { outputPath, format } = resolveOutputPath(options.output || "txt", defaultOutputName);
+      const { outputPath, format } = resolveOutputPath(opts.output || "txt", defaultOutputName);
 
       const summary = { total: validatedItems.length, pass: passCount, fail: failCount, rejected: rejectCount, totalTokens };
 
@@ -376,12 +429,12 @@ program.parse();
 
 /**
  * Parseia arquivo batch (TXT ou JSON)
- * TXT: linhas no formato "heuristica arquivo" (ignora linhas vazias e comentários #)
- * JSON: array de { heuristic, evidence, context? }
+ * TXT: "heuristica arquivo" ou "heuristica:jornada arquivo" (para projetos Finance)
+ * JSON: array de { heuristic, evidence, context?, journey? }
  */
 async function parseBatchFile(filePath) {
   const resolvedPath = path.resolve(filePath);
-  
+
   try {
     await fs.access(resolvedPath);
   } catch {
@@ -397,34 +450,48 @@ async function parseBatchFile(filePath) {
       if (!Array.isArray(items)) {
         throw new Error("Arquivo JSON deve conter um array de itens.");
       }
-      return items.map((item) => ({
-        heuristic: String(item.heuristic || item.heuristicNumber),
-        evidence: item.evidence || item.file || item.video,
-        context: item.context || ""
-      })).filter((item) => item.heuristic && item.evidence);
+      return items.map((item) => {
+        const heuristicStr = String(item.heuristic || item.heuristicNumber || "");
+        const colonIdx = heuristicStr.indexOf(":");
+        const heuristic = colonIdx >= 0 ? heuristicStr.slice(0, colonIdx) : heuristicStr;
+        const journey = colonIdx >= 0 ? heuristicStr.slice(colonIdx + 1) : (item.journey || "");
+        const raw = item.evidence ?? item.file ?? item.video;
+        const evidence = Array.isArray(raw)
+          ? raw.map((x) => String(x).trim()).filter(Boolean)
+          : (typeof raw === "string" ? raw.split(",").map((s) => s.trim()).filter(Boolean) : []);
+        return {
+          heuristic,
+          journey: journey.trim(),
+          evidence,
+          context: item.context || ""
+        };
+      }).filter((item) => item.heuristic && item.evidence.length > 0);
     } catch (err) {
       throw new Error(`Erro ao parsear JSON: ${err.message}`);
     }
   }
 
-  // Formato TXT (default)
+  // Formato TXT
   const lines = content.split("\n");
   const items = [];
 
   for (const line of lines) {
     const trimmed = line.trim();
-    
-    // Ignorar linhas vazias e comentários
-    if (!trimmed || trimmed.startsWith("#")) {
-      continue;
-    }
 
-    // Formato: "heuristica arquivo" ou "heuristica    arquivo" (múltiplos espaços/tabs)
+    if (!trimmed || trimmed.startsWith("#")) continue;
+
     const parts = trimmed.split(/\s+/);
     if (parts.length >= 2) {
+      const first = parts[0];
+      const colonIdx = first.indexOf(":");
+      const heuristic = colonIdx >= 0 ? first.slice(0, colonIdx) : first;
+      const journey = colonIdx >= 0 ? first.slice(colonIdx + 1) : "";
+      const evidenceStr = parts.slice(1).join(" ");
+      const evidence = evidenceStr.split(",").map((s) => s.trim()).filter(Boolean);
       items.push({
-        heuristic: parts[0],
-        evidence: parts.slice(1).join(" "), // Permite nomes com espaço
+        heuristic,
+        journey,
+        evidence,
         context: ""
       });
     }
@@ -497,6 +564,20 @@ async function resolveFile(input, silent = false) {
   return null;
 }
 
+/**
+ * Resolve um ou mais arquivos (separados por vírgula)
+ */
+async function resolveFiles(input, silent = false) {
+  const parts = input.split(",").map((s) => s.trim()).filter(Boolean);
+  const resolved = [];
+  for (const part of parts) {
+    const p = await resolveFile(part, silent);
+    if (!p) return null;
+    resolved.push(p);
+  }
+  return resolved.length > 0 ? resolved : null;
+}
+
 function getMimeType(filePath) {
   const ext = path.extname(filePath).toLowerCase();
   const types = {
@@ -516,6 +597,79 @@ function getMimeType(filePath) {
 
 function filterByNumber(heuristics, numbers) {
   return heuristics.filter((h) => numbers.includes(h.heuristicNumber));
+}
+
+/**
+ * Verifica se heurística pertence à jornada (slug)
+ * Suporta h.journey.slug (finance) e h.journeys[].slug (retail)
+ */
+function matchesJourney(h, journeySlug) {
+  if (!journeySlug) return true;
+  const slug = journeySlug.toLowerCase();
+  if (h.journey?.slug) return h.journey.slug.toLowerCase() === slug;
+  if (h.journeys?.length) return h.journeys.some((j) => j.slug?.toLowerCase() === slug);
+  return false;
+}
+
+/**
+ * Retorna slugs únicos de jornadas nas heurísticas
+ */
+function getUniqueJourneySlugs(heuristics) {
+  const slugs = new Set();
+  for (const h of heuristics) {
+    if (h.journey?.slug) slugs.add(h.journey.slug);
+    if (h.journeys) for (const j of h.journeys) if (j.slug) slugs.add(j.slug);
+  }
+  return [...slugs].sort();
+}
+
+/**
+ * Encontra uma heurística por número e jornada
+ */
+function findHeuristicByNumberAndJourney(heuristics, number, journeySlug, meta) {
+  const requiresJourney = meta?.requiresJourney === true;
+
+  if (requiresJourney && !journeySlug) {
+    const available = getUniqueJourneySlugs(heuristics);
+    throw new Error(
+      `Projeto Finance exige jornada. Use -j <slug>.\n` +
+      `Jornadas disponíveis: ${available.join(", ")}`
+    );
+  }
+
+  const matches = heuristics.filter(
+    (h) => h.heuristicNumber === number && matchesJourney(h, journeySlug)
+  );
+
+  if (matches.length === 0) return null;
+  if (matches.length > 1) return matches[0]; // edge case
+  return matches[0];
+}
+
+/**
+ * Filtra heurísticas por número e (opcionalmente) jornada
+ * Projetos com requiresJourney exigem journey; retail ignora
+ */
+function filterByNumberAndJourney(heuristics, numbers, journeySlug, meta) {
+  const requiresJourney = meta?.requiresJourney === true;
+
+  if (requiresJourney && !journeySlug) {
+    const available = getUniqueJourneySlugs(heuristics);
+    throw new Error(
+      `Projeto Finance exige jornada. Use -j <slug>.\n` +
+      `Ex: sherlock -p finance5 -j abertura video.mp4 1.3\n` +
+      `Jornadas disponíveis: ${available.join(", ")}`
+    );
+  }
+
+  const result = [];
+  for (const num of numbers) {
+    const h = heuristics.find(
+      (x) => x.heuristicNumber === num && matchesJourney(x, journeySlug)
+    );
+    if (h) result.push(h);
+  }
+  return result;
 }
 
 function printResult(r) {

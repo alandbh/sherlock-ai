@@ -53,9 +53,19 @@ export async function loadProject(name) {
     );
   }
 
+  // Carregar meta (includes requiresJourney para projetos Finance)
+  let meta = {};
+  try {
+    const metaPath = path.join(projectPath, "meta.json");
+    meta = JSON.parse(await fs.readFile(metaPath, "utf-8"));
+  } catch {
+    // meta.json é opcional
+  }
+
   return {
     name,
     path: projectPath,
+    meta,
 
     async loadHeuristics() {
       const filePath = path.join(projectPath, "heuristics.json");
