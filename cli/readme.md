@@ -77,11 +77,21 @@ O comando `npm link` instala o `sherlock` globalmente, permitindo usá-lo de qua
 cp .env.example .env
 ```
 
-1. Edite o `.env` e adicione sua chave do Gemini:
+2. Edite o `.env` e adicione sua chave do Gemini:
 
 ```
 GEMINI_API_KEY=sua-chave-aqui
 ```
+
+3. (Opcional) Para sincronizar heurísticas automaticamente pela API a cada execução:
+
+```
+BASE_API_URL=https://sua-api.com
+API_KEY=sua-chave-da-api-de-heuristicas
+```
+
+Com `BASE_API_URL` e `API_KEY` configurados, o CLI busca heurísticas remotas a cada execução e atualiza o `heuristics.json` local como cache.  
+Se a API falhar, o CLI exibe um aviso e usa o arquivo local.
 
 O arquivo `.env` fica na pasta `cli/` e é carregado automaticamente a cada execução.
 
@@ -319,6 +329,16 @@ Os projetos ficam em `cli/projects/`. Cada projeto é uma pasta com:
 - `system_prompt.txt` – instruções para o Gemini
 - `meta.json` – metadados (opcional)
 
+Campos opcionais em `meta.json` para sync remoto de heurísticas:
+
+- `slug` – slug do projeto usado no endpoint default
+- `heuristicsEndpoint` – endpoint explícito para heurísticas (ex.: `/heuristics?project=finance5`)
+
+Precedência do endpoint remoto no CLI:
+
+1. `meta.heuristicsEndpoint`
+2. Default: `/heuristics?project=<slug>` (`slug` do `meta.json`; fallback para nome da pasta)
+
 Para adicionar um novo projeto, crie uma pasta em `projects/` com esses arquivos:
 
 ```
@@ -327,7 +347,7 @@ cli/projects/
 │   ├── heuristics.json
 │   ├── system_prompt.txt
 │   └── meta.json
-├── finance/
+├── finance5/
 │   ├── heuristics.json
 │   └── system_prompt.txt
 └── ...
@@ -400,4 +420,3 @@ sherlock heuristics -p finance5 -j abertura
 # Vincular diretório ao projeto retail6
 sherlock init retail6
 ```
-

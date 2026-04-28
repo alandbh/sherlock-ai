@@ -1,4 +1,6 @@
 {
+  "slug": "finance5",
+  "heuristicsEndpoint": "/heuristics?project=finance5",
   "requiresJourney": true,
   "description": "Heurísticas para apps bancários e financeiros (Finance 5)",
   "version": "5.0",

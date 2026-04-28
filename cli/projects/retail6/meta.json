@@ -1,4 +1,6 @@
 {
+  "slug": "retail6",
+  "heuristicsEndpoint": "/heuristics?project=retail6",
   "description": "Heurísticas para e-commerce e varejo (Retail 6)",
   "version": "6.0",
   "author": "Time UX Retail",
