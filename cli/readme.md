@@ -27,7 +27,7 @@ Ferramenta de linha de comando para análise heurística de UX em e-commerces e 
 
 ## O que é
 
-O **Sherlock CLI** é uma interface de terminal que permite realizar avaliações heurísticas de UX sem usar o navegador. Você envia vídeos ou imagens de evidência e o Sherlock utiliza o modelo Gemini 2.5 Pro para analisar cada heurística, retornando score (1–5) e justificativa.
+O **Sherlock CLI** é uma interface de terminal que permite realizar avaliações heurísticas de UX sem usar o navegador. Você envia vídeos ou imagens de evidência e o Sherlock utiliza o modelo configurado em `GEMINI_MODEL` para analisar cada heurística, retornando score (1–5) e justificativa.
 
 Principais características:
 
@@ -81,7 +81,10 @@ cp .env.example .env
 
 ```
 GEMINI_API_KEY=sua-chave-aqui
+GEMINI_MODEL=gemini-3.1-pro-preview
 ```
+
+`GEMINI_MODEL` é opcional. Quando omitido, o CLI usa `gemini-2.5-pro` como fallback estável.
 
 3. (Opcional) Para sincronizar heurísticas automaticamente pela API a cada execução:
 

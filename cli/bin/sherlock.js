@@ -15,7 +15,7 @@ import ora from "ora";
 import fs from "fs/promises";
 
 import { uploadLocalFile } from "../lib/upload.js";
-import { analyzeWithGemini } from "../lib/analyze.js";
+import { analyzeWithGemini, getGeminiModel } from "../lib/analyze.js";
 import { resolveProject, listProjects } from "../lib/project.js";
 
 program
@@ -86,7 +86,7 @@ program
       spinner.succeed(`Upload concluído: ${fileNames.join(", ")}`);
 
       // 5. Carregar system prompt e analisar
-      spinner.start("Analisando com Gemini 2.5 Pro...");
+      spinner.start(`Analisando com ${getGeminiModel()}...`);
       const systemPrompt = await project.loadSystemPrompt();
       
       const result = await analyzeWithGemini({
