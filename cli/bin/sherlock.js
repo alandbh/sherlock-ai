@@ -15,7 +15,7 @@ import ora from "ora";
 import fs from "fs/promises";
 
 import { uploadLocalFile } from "../lib/upload.js";
-import { analyzeWithGemini, getGeminiModel } from "../lib/analyze.js";
+import { analyzeWithGemini, getGeminiModel, getGeminiTemperature } from "../lib/analyze.js";
 import { resolveProject, listProjects } from "../lib/project.js";
 
 program
@@ -103,8 +103,9 @@ program
         printResult(r);
       }
 
+      console.log(chalk.dim("\n─────────────────────────────────────"));
+      console.log(chalk.dim(`Modelo: ${getGeminiModel()} | Temperatura: ${getGeminiTemperature()}`));
       if (result.usage) {
-        console.log(chalk.dim("\n─────────────────────────────────────"));
         console.log(chalk.dim(`Tokens: ${result.usage.totalTokenCount} (prompt: ${result.usage.promptTokenCount}, resposta: ${result.usage.candidatesTokenCount})`));
       }
 
@@ -392,6 +393,7 @@ program
         chalk.yellow(`${failCount} fail`) +
         (rejectCount > 0 ? " | " + chalk.red(`${rejectCount} rejected`) : ""));
       console.log(chalk.dim(`   Tokens totais: ${totalTokens.toLocaleString()}`));
+      console.log(chalk.dim(`   Modelo: ${getGeminiModel()} | Temperatura: ${getGeminiTemperature()}`));
 
       // 7. Salvar resultados (TXT por default)
       const batchBaseName = path.basename(arquivo, path.extname(arquivo));

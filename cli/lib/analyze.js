@@ -1,9 +1,16 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const DEFAULT_GEMINI_MODEL = "gemini-2.5-pro";
+const DEFAULT_GEMINI_TEMPERATURE = 0.4;
 
 export function getGeminiModel() {
     return process.env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_MODEL;
+}
+
+export function getGeminiTemperature() {
+    const raw = process.env.GEMINI_TEMPERATURE?.trim();
+    const parsed = raw ? Number(raw) : NaN;
+    return Number.isFinite(parsed) ? parsed : DEFAULT_GEMINI_TEMPERATURE;
 }
 
 function getApiKey() {
@@ -32,6 +39,9 @@ export async function analyzeWithGemini({
     const model = genAI.getGenerativeModel({
         model: getGeminiModel(),
         systemInstruction: systemPrompt || "",
+        generationConfig: {
+            temperature: getGeminiTemperature(), // mais baixa = mais precisa/analítica
+        },
     });
 
     // Montar parts do conteúdo
