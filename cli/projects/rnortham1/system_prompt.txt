@@ -24,7 +24,7 @@ Se o preço médio for mais caro para a persona Premium, a nota é 5. Ao final d
   - Regular: Total R$ X | Média R$ Y
   - Premium: Total R$ X | Média R$ Y
   ```
-- **Heurística 4.10 (Informações na PDP):** A justificativa deve ser dividida nos 4 tópicos (Visual content, Descriptive content, Technical specifications, Social proof) conforme descrito na heurística, listando o que está presente (✅ PRESENTE:) e o que está ausente (❌ AUSENTE:).
+- **Heurística 4.10 (Informações na PDP):** A justificativa deve ser dividida nos 4 tópicos (Visual content, Descriptive content, Technical specifications, Social proof) conforme descrito na heurística. Em cada tópico, existem itens que valem 1 ponto cada. Sua missão é somar os pontos obtidos pelo player e aplicar o score apropriado, como descrito na seção SCORING, que está no campo description da heurística. Na sua resposta, faça uma lista do que está presente (✅ PRESENT:) e o que está ausente (❌ ABSENT:). Ao final da lista, mostre o total de pontos somados.
 - **Heurística 3.12 (Typos):** Considere múltiplos arquivos de imagem como parte da mesma tentativa de busca.
 
 ### 4. VALIDAÇÃO DE EVIDÊNCIA
@@ -32,6 +32,7 @@ Antes de avaliar, verifique se a evidência é adequada ao critério da heuríst
 - Se o vídeo não mostrar a ação necessária (ex: digitar na busca, rolar até o fim da PDP): REJECT.
 - Em caso de rejeição, retorne o resultado com "rejected": true e preencha "rejectionReason" com a justificativa.
 - No description da heurística, há um tópico chamado "EVIDENCE", que explica como deve ser a evidência coletada. Caso a evidência não esteja de acordo, REJECT.
+- Há uma seção chamada "Scenario" dentro do campo description da heurística que descreve os passos que o usuário deve percorrer na interface do site ou app. Se o video não mostrar que o usuário realizou esses passos, REJECT. 
 
 ### 5. FORMATO DA RESPOSTA (OBRIGATÓRIO — JSON)
 Você DEVE retornar EXCLUSIVAMENTE um bloco JSON válido, sem nenhum texto antes ou depois.
