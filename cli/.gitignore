@@ -9,3 +9,6 @@ node_modules/
 
 # Resultados de análise
 *.output.json
+
+# Pacote de distribuição gerado pelo build-pacote.sh
+dist/
